@@ -222,34 +222,29 @@ def _spawn_java(
 def _spawn_rust(
     agent_dir: Path, http_port: int, grpc_port: int, popen: _PopenFactory,
 ) -> subprocess.Popen:
-    release_dir = agent_dir / 'target' / 'release'
-    binary = _find_rust_binary(release_dir)
+    # Always build for current Rust agent so local source changes are used and
+    # stale itk-* binaries from previous runs cannot mask regressions.
+    build_env = os.environ.copy()
+    rust_target_root = Path(
+        build_env.get(
+            'ITK_RUST_CURRENT_TARGET_DIR',
+            str(Path(gettempdir()) / 'itk-rust-current-target'),
+        )
+    )
+    rust_target_root.mkdir(parents=True, exist_ok=True)
+    build_env['CARGO_TARGET_DIR'] = str(rust_target_root)
+    subprocess.run(  # noqa: S603
+        ['cargo', 'build', '--locked', '--release'],  # noqa: S607
+        cwd=str(agent_dir),
+        env=build_env,
+        check=True,
+    )
+    binary = _find_rust_binary(rust_target_root / 'release')
     if binary is None:
-        # Lazy build for MOUNT/LOCAL. CHECKOUT trees already contain the
-        # binary because the launcher's builder built them under the cache lock.
-        # Build into a dedicated writable target dir to avoid bind-mount
-        # permission issues under /app/agents/repo/itk/target in CI.
-        build_env = os.environ.copy()
-        rust_target_root = Path(
-            build_env.get(
-                'ITK_RUST_CURRENT_TARGET_DIR',
-                str(Path(gettempdir()) / 'itk-rust-current-target'),
-            )
+        raise RuntimeError(
+            'cargo build succeeded but no itk-* binary found in '
+            f'{rust_target_root / "release"}'
         )
-        rust_target_root.mkdir(parents=True, exist_ok=True)
-        build_env['CARGO_TARGET_DIR'] = str(rust_target_root)
-        subprocess.run(  # noqa: S603
-            ['cargo', 'build', '--locked', '--release'],  # noqa: S607
-            cwd=str(agent_dir),
-            env=build_env,
-            check=True,
-        )
-        binary = _find_rust_binary(rust_target_root / 'release')
-        if binary is None:
-            raise RuntimeError(
-                'cargo build succeeded but no itk-* binary found in '
-                f'{rust_target_root / "release"}'
-            )
     args = [  # noqa: S607
         str(binary),
         '--httpPort', str(http_port),
@@ -261,6 +256,9 @@ def _spawn_rust(
 def _find_rust_binary(release_dir: Path) -> Path | None:
     if not release_dir.exists():
         return None
+    current_named = release_dir / 'itk-rust-current-agent'
+    if current_named.exists():
+        return current_named
     canonical = release_dir / 'itk-current-agent'
     if canonical.exists():
         return canonical

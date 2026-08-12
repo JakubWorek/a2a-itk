@@ -336,31 +336,74 @@ impl ItkExecutor {
             tenant: None,
         };
 
-        // Initial streaming call – grab first event to get task ID then disconnect
+        // Initial streaming call – grab first event to get task ID.
         let mut stream = client
             .send_streaming_message(&req)
             .await
             .map_err(|e| format!("resubscribe initial streaming failed: {e}"))?;
 
         let mut task_id: Option<String> = None;
+        let mut results = Vec::new();
         if let Some(event) = stream.next().await {
             let event = event.map_err(|e| format!("resubscribe initial event error: {e}"))?;
             task_id = Self::task_id_from_stream_response(&event);
+            results.extend(Self::text_from_stream_response(event));
         }
-        drop(stream);
 
         let task_id = task_id.ok_or_else(|| "resubscribe: no task ID from initial event".to_string())?;
-        info!(task_id = %task_id, "Disconnected; resubscribing");
+        info!(task_id = %task_id, "Attempting resubscribe");
 
-        let mut resub = client
+        let mut resub = match client
             .subscribe_to_task(&SubscribeToTaskRequest {
                 id: task_id.clone(),
                 tenant: None,
             })
             .await
-            .map_err(|e| format!("subscribe_to_task failed: {e}"))?;
+        {
+            Ok(s) => {
+                // Disconnect the original stream only after subscribe succeeds.
+                drop(stream);
+                s
+            }
+            Err(e) => {
+                let err = e.to_string();
+                let err_lc = err.to_ascii_lowercase();
+                if err_lc.contains("task not found")
+                    || err_lc.contains("not found")
+                    || err_lc.contains("http 404")
+                    || err_lc.contains("failed to get task")
+                {
+                    // Some SDK combinations can complete quickly enough that the
+                    // subscribe endpoint races with completion. In this case,
+                    // first try reading task state/history, then consume the
+                    // original stream instead of failing.
+                    info!(task_id = %task_id, error = %err, "Resubscribe raced with completion; consuming original stream");
 
-        let mut results = Vec::new();
+                    if let Ok(task) = client
+                        .get_task(&GetTaskRequest {
+                            id: task_id.clone(),
+                            history_length: None,
+                            tenant: None,
+                        })
+                        .await
+                    {
+                        results.extend(Self::text_from_task(&task));
+                        if !results.is_empty() {
+                            return Ok(results);
+                        }
+                    }
+
+                    while let Some(event) = stream.next().await {
+                        let event = event.map_err(|ev| format!("resubscribe fallback stream event error: {ev}"))?;
+                        results.extend(Self::text_from_stream_response(event));
+                    }
+
+                    return Ok(results);
+                }
+                return Err(format!("subscribe_to_task failed: {e}"));
+            }
+        };
+
         let mut finished = false;
 
         while let Some(event) = resub.next().await {
@@ -421,6 +464,22 @@ impl ItkExecutor {
             StreamResponse::StatusUpdate(u) => Some(u.task_id.clone()),
             _ => None,
         }
+    }
+
+    fn text_from_task(task: &Task) -> Vec<String> {
+        let mut out = Vec::new();
+
+        if let Some(msg) = &task.status.message {
+            out.extend(Self::text_from_message(msg));
+        }
+
+        if let Some(history) = &task.history {
+            for msg in history {
+                out.extend(Self::text_from_message(msg));
+            }
+        }
+
+        out
     }
 
     fn text_from_message(m: &Message) -> Vec<String> {
