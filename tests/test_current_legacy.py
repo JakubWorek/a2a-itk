@@ -170,9 +170,11 @@ class TestPerLanguageArgv:
         ]
         assert cwd == mount
 
-    def test_rust_prebuilt_binary(self, mount):
+    def test_rust_builds_and_executes_canonical_binary(self, mount, monkeypatch):
         (mount / 'Cargo.toml').write_text('[package]\nname="x"\n', encoding='utf-8')
-        release = mount / 'target' / 'release'
+        target_dir = mount.parent.parent.parent / 'rust-target'
+        monkeypatch.setenv('ITK_RUST_CURRENT_TARGET_DIR', str(target_dir))
+        release = target_dir / 'release'
         release.mkdir(parents=True)
         canonical = release / 'itk-current-agent'
         canonical.write_text('bin', encoding='utf-8')
@@ -187,10 +189,12 @@ class TestPerLanguageArgv:
         ]
         assert cwd == mount
 
-    def test_rust_prefers_canonical_over_alternates(self, mount):
+    def test_rust_prefers_canonical_over_alternates(self, mount, monkeypatch):
         # If both a canonical and an alternate binary exist, canonical wins.
         (mount / 'Cargo.toml').write_text('[package]\nname="x"\n', encoding='utf-8')
-        release = mount / 'target' / 'release'
+        target_dir = mount.parent.parent.parent / 'rust-target'
+        monkeypatch.setenv('ITK_RUST_CURRENT_TARGET_DIR', str(target_dir))
+        release = target_dir / 'release'
         release.mkdir(parents=True)
         alt = release / 'itk-something-else'
         alt.write_text('bin', encoding='utf-8')

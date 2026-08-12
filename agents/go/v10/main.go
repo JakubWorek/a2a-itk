@@ -1,10 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -67,13 +67,13 @@ func (e *V10AgentExecutor) Execute(ctx context.Context, execCtx *a2asrv.Executor
 		response := strings.Join(results, "\n")
 		if shouldHold(instruction) {
 			log.Info(ctx, "Holding task as requested", "taskId", string(execCtx.TaskID))
-			
+
 			// Emitted event: response + task-finished
 			log.Info(ctx, "Emitting response and task-finished", "taskId", string(execCtx.TaskID))
 			if !yield(a2a.NewStatusUpdateEvent(execCtx, a2a.TaskStateWorking, a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart(response+"\ntask-finished"))), nil) {
 				return
 			}
-			
+
 			ticker := time.NewTicker(2 * time.Second)
 			defer ticker.Stop()
 
@@ -190,7 +190,7 @@ func (e *V10AgentExecutor) handleCallAgent(ctx context.Context, call *pb.CallAge
 	// 4. Create client using a factory
 	var factory *a2aclient.Factory
 	compatFactory := a2av0.NewJSONRPCTransportFactory(a2av0.JSONRPCTransportConfig{})
-	
+
 	clientOpts := []a2aclient.FactoryOption{
 		a2agrpc.WithGRPCTransport(grpc.WithTransportCredentials(insecure.NewCredentials())),
 		a2aclient.WithCompatTransport("0.3", a2a.TransportProtocolJSONRPC, compatFactory),
@@ -256,11 +256,13 @@ func (e *V10AgentExecutor) handleCallAgentWithResubscribe(ctx context.Context, c
 
 	events := client.SendStreamingMessage(initCtx, &a2a.SendMessageRequest{Message: wrappedMsg})
 	var taskID string
+	var responses []string
 
 	for ev, err := range events {
 		if err != nil {
 			return nil, fmt.Errorf("initial call failed: %w", err)
 		}
+		responses = append(responses, extractResponses(ctx, ev)...)
 		switch r := ev.(type) {
 		case *a2a.Task:
 			taskID = string(r.ID)
@@ -272,16 +274,33 @@ func (e *V10AgentExecutor) handleCallAgentWithResubscribe(ctx context.Context, c
 		}
 	}
 
-	cancelInit()
-	log.Info(ctx, "Disconnected from task, now re-subscribing", "taskId", taskID)
+	log.Info(ctx, "Attempting re-subscribe", "taskId", taskID)
 
 	resubEvents := client.SubscribeToTask(ctx, &a2a.SubscribeToTaskRequest{ID: a2a.TaskID(taskID)})
 
 	var taskObj *a2a.Task
-	var responses []string
+	disconnected := false
 	for ev, err := range resubEvents {
 		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "task not found") {
+				// Some SDK combinations can complete before re-subscribe attaches.
+				// Fall back to draining the original stream so verification tokens
+				// are still collected.
+				log.Info(ctx, "Re-subscribe raced with completion; draining original stream", "taskId", taskID, "error", err)
+				for origEv, origErr := range events {
+					if origErr != nil {
+						return nil, fmt.Errorf("fallback original stream failed: %w", origErr)
+					}
+					responses = append(responses, extractResponses(ctx, origEv)...)
+				}
+				return responses, nil
+			}
 			return nil, fmt.Errorf("resubscribe failed: %w", err)
+		}
+		if !disconnected {
+			cancelInit()
+			disconnected = true
+			log.Info(ctx, "Disconnected from task, now re-subscribing", "taskId", taskID)
 		}
 		if r, ok := ev.(*a2a.Task); ok {
 			taskObj = r
@@ -306,7 +325,7 @@ func (e *V10AgentExecutor) handleCallAgentWithResubscribe(ctx context.Context, c
 				t := r
 				t = strings.ReplaceAll(t, "task-finished", "")
 				responses = append(responses, t)
-				
+
 				if strings.Contains(r, "task-finished") {
 					log.Info(ctx, "Received task-finished after re-subscribe, breaking loop.")
 					goto EndLoop
@@ -414,8 +433,6 @@ func selectInterfaces(protocol a2a.TransportProtocol, card *a2a.AgentCard) []*a2
 	return matched
 }
 
-
-
 var httpPort = flag.Int("httpPort", 10102, "HTTP port")
 var grpcPort = flag.Int("grpcPort", 11002, "gRPC port")
 
@@ -446,7 +463,7 @@ func run() error {
 	default:
 		level = slog.LevelInfo
 	}
-	
+
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	slog.SetDefault(logger)
 
@@ -584,4 +601,3 @@ func streamLoggingInterceptor(logger *slog.Logger) grpc.StreamServerInterceptor 
 		return handler(srv, ss)
 	}
 }
-

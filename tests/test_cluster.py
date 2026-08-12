@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -443,7 +444,7 @@ class TestProcessGroupTeardown:
 
     def test_kill_pgroup_on_already_dead_proc_is_noop(self):
         # Popen for an immediate exit.
-        proc = subprocess.Popen(['/bin/true'])  # noqa: S603, S607
+        proc = subprocess.Popen([sys.executable, '-c', 'pass'])  # noqa: S603
         proc.wait()
         # Should not raise even though pgroup is long gone.
         cluster._kill_pgroup(proc, grace_s=1)  # noqa: SLF001

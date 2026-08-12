@@ -582,8 +582,12 @@ async def _execute_single_itk_test(  # noqa: PLR0913
 
         base_uri = test_suite.get_agent_card_uri(first_sdk)
         target_url = f'{base_uri.rstrip("/")}/jsonrpc'
-        is_go_env = os.path.exists('/app/agents/repo/itk/go.mod')
-        is_rust_env = os.path.exists('/app/agents/repo/itk/Cargo.toml')
+        is_go_env = os.path.exists('/app/agents/repo/itk/go.mod') or os.path.exists(
+            'agents/repo/itk/go.mod'
+        )
+        is_rust_env = os.path.exists('/app/agents/repo/itk/Cargo.toml') or os.path.exists(
+            'agents/repo/itk/Cargo.toml'
+        )
         if (
             'go' in first_sdk
             or first_sdk.startswith('rust_')
