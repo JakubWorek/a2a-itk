@@ -368,8 +368,7 @@ TEST_CASES = [
         'sdks': ['current', 'go_v10'],
         'protocols': ['http_json'],
         'edges': ['0->1', '1->0'],
-        # Keep nested resubscribe behavior, but avoid flaky top-level SSE hang.
-        'streaming': False,
+        'streaming': True,
         'behavior': 'resubscribe',
     },
     {

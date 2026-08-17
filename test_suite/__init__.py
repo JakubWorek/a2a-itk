@@ -229,10 +229,7 @@ def _traversal_to_instruction(
     current_inst.return_response.response = (
         f'{_END_OF_TRAVERSAL_TOKEN}:{transport}'
     )
-    is_current_go_pair = set(circuit) == {'current', 'go_v10'}
-    hold_task = behavior == 'resubscribe' and not (
-        transport == 'http_json' and is_current_go_pair
-    )
+    hold_task = behavior == 'resubscribe'
     current_inst.return_response.hold_task = hold_task
     trace_tokens = []
 
