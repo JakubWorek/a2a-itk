@@ -214,10 +214,24 @@ echo "ITK Service is up! Sending compatibility test request using $SCENARIO_FILE
 # service which SDK is under test, so scenarios gated on `test_when` and the
 # `include_own_lines` peers resolve for the right one — without it a shared
 # set would quietly run a different mix of peers.
+#
+# The module lives under test_suite/ rather than scripts/ because
+# .dockerignore excludes scripts/ — everything else in it runs on the host.
 $CONTAINER_RT exec -i -w /app itk-service \
-  uv run python scripts/build_run_request.py \
+  uv run python -m test_suite.scenarios.build_request \
     --scenarios - --sut-sdk "$ITK_MATRIX_SDK" --output - \
   < "$SCENARIO_FILE" > run_request.json
+BUILD_REQUEST_STATUS=$?
+
+# Bail here rather than POSTing whatever landed in the file. An empty body
+# comes back as a FastAPI 422 about a missing field, which says nothing about
+# the actual problem and sends the reader hunting in the wrong place.
+if [ $BUILD_REQUEST_STATUS -ne 0 ] || [ ! -s run_request.json ]; then
+  echo "Error: could not build the /run request from $SCENARIO_FILE" >&2
+  echo "       (build_request exited $BUILD_REQUEST_STATUS)" >&2
+  $CONTAINER_RT logs itk-service
+  exit 1
+fi
 
 curl -s -X POST http://127.0.0.1:8000/run \
   -H "Content-Type: application/json" \

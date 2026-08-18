@@ -13,18 +13,23 @@ Deliberately does no resolving: roles are bound by the service, against the
 whichever host posts it.
 
 Runs inside the ITK container rather than on the host: reading YAML needs
-PyYAML, and a bare GitHub runner has no guarantee of it, while the container
-already depends on it. ``-`` means stdin/stdout so the file can be piped in
+PyYAML, and a bare CI runner has no guarantee of it, while the service image
+already depends on it. ``-`` means stdin/stdout, so the file is piped in
 through ``docker exec`` without being copied anywhere.
+
+That is also why this lives in ``test_suite/`` and not ``scripts/``:
+``.dockerignore`` excludes ``scripts/`` precisely because everything in it
+runs on the host, so a script placed there is not in the image at all.
 
 Usage::
 
-    build_run_request.py --scenarios scenarios.json --sut-sdk python \\
-                         --output run_request.json
+    python -m test_suite.scenarios.build_request \\
+        --scenarios scenarios.json --sut-sdk python --output run_request.json
 
     docker exec -i -w /app itk-service uv run python \\
-        scripts/build_run_request.py --scenarios - --sut-sdk python \\
-        --output - < scenarios.yaml > run_request.json
+        -m test_suite.scenarios.build_request \\
+        --scenarios - --sut-sdk python --output - \\
+        < scenarios.yaml > run_request.json
 """
 
 from __future__ import annotations

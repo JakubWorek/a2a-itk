@@ -3,7 +3,6 @@
 | Script | Runs where | Purpose |
 | --- | --- | --- |
 | `run_itk_shared.sh` | SDK repo, host | Shared driver for each SDK's `itk/run_itk.sh` |
-| `build_run_request.py` | SDK repo, host | Turns a scenario file (JSON or YAML) into a `/run` body |
 | `itk_report.py` | SDK repo, host | Validates and summarises a `/run` response |
 | `process_results.py` | SDK repo, host | Merges nightly results into the published history |
 | `scenarios_diff.py` | a2a-itk, CI | Checks the shared scenario set still covers each SDK's legacy set |
@@ -54,11 +53,16 @@ Or name one directly — JSON or YAML, either schema:
 SCENARIO_FILE=a2a-itk/scenarios/traversal/pr.yaml bash itk/run_itk.sh
 ```
 
-The request body is built by `build_run_request.py` **inside the container**,
-because reading YAML needs PyYAML and a bare CI runner has no guarantee of it
-while the service image already depends on it. `ITK_MATRIX_SDK` is passed
-through as `sut_sdk` so `test_when` and `include_own_lines` resolve for the
-right SDK — without it a shared set would quietly run a different peer mix.
+The request body is built by `test_suite/scenarios/build_request.py` **inside
+the container**, because reading YAML needs PyYAML and a bare CI runner has no
+guarantee of it while the service image already depends on it. `ITK_MATRIX_SDK`
+is passed through as `sut_sdk` so `test_when` and `include_own_lines` resolve
+for the right SDK — without it a shared set would quietly run a different peer
+mix.
+
+> Everything in *this* directory runs on the host: `.dockerignore` excludes
+> `scripts/` from the image. Anything that has to run inside the container
+> belongs under `test_suite/`, which is why `build_request.py` lives there.
 
 Unchanged and still honoured: `A2A_ITK_REVISION`, `ITK_ENTRYPOINT`,
 `ITK_LOG_LEVEL`, `ITK_NIGHTLY_RUN`, `ITK_SKIP_BUILD`, `ITK_READINESS_TIMEOUT`,
