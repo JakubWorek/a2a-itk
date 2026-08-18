@@ -19,6 +19,7 @@ kept out of matrix so tests here are pure and network-free.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -36,6 +37,11 @@ class MatrixError(ValueError):
     """Invalid matrix.yaml, or an agent id that doesn't map to any entry."""
 
 
+# Every transport the traversal engine knows. A line that doesn't declare a
+# subset is assumed to speak all of them.
+ALL_TRANSPORTS = frozenset({'jsonrpc', 'grpc', 'http_json'})
+
+
 @dataclass(frozen=True)
 class MatrixEntry:
     """One (sdk, line) → (repo, ref) row."""
@@ -44,6 +50,22 @@ class MatrixEntry:
     line: str   # 'v10', 'v03'
     repo: str   # 'a2aproject/a2a-python'
     ref: str    # 'main', 'v0.3.24+itk', or a full SHA
+    transports: frozenset[str] = ALL_TRANSPORTS
+
+    @property
+    def agent_id(self) -> str:
+        """The scenario-level identifier this row is addressed by."""
+        return f'{self.sdk}_{self.line}'
+
+    def supports(self, transports: 'Iterable[str]') -> bool:
+        """Can this line speak every one of ``transports``?
+
+        Used to expand the ``peers: all`` macro. Scenarios that name their
+        peers explicitly bypass this — the author asked for those peers, and
+        second-guessing them would silently change what a migrated scenario
+        covers.
+        """
+        return set(transports) <= self.transports
 
 
 class Matrix:
@@ -102,7 +124,13 @@ class Matrix:
                         f'sdks.{sdk}.{line}: repo and ref must be strings '
                         f'(got repo={type(repo).__name__}, ref={type(ref).__name__})'
                     )
-                entries[(sdk, line)] = MatrixEntry(sdk=sdk, line=line, repo=repo, ref=ref)
+                entries[(sdk, line)] = MatrixEntry(
+                    sdk=sdk,
+                    line=line,
+                    repo=repo,
+                    ref=ref,
+                    transports=_parse_transports(cfg.get('transports'), sdk, line),
+                )
         return cls(entries)
 
     # -- lookup --------------------------------------------------------------
@@ -156,6 +184,15 @@ class Matrix:
         """All (sdk, line) pairs, sorted. Useful for CI diagnostics."""
         return sorted(self._entries.keys())
 
+    def entries(self) -> list[MatrixEntry]:
+        """Every row, ordered by (sdk, line).
+
+        Backs the ``peers: all`` macro. Sorted so the peer list a scenario
+        expands to is stable run to run — an unstable order would reshuffle
+        edge indices and make results incomparable between runs.
+        """
+        return [self._entries[k] for k in sorted(self._entries)]
+
     def __contains__(self, agent_id: str) -> bool:
         try:
             self.resolve(agent_id)
@@ -165,6 +202,33 @@ class Matrix:
 
     def __len__(self) -> int:
         return len(self._entries)
+
+
+def _parse_transports(raw: object, sdk: str, line: str) -> frozenset[str]:
+    """Validate a line's optional ``transports:`` list.
+
+    Absent means "all three". A typo here would silently shrink which peers
+    the ``peers: all`` macro selects, so unknown names are rejected rather
+    than ignored.
+    """
+    if raw is None:
+        return ALL_TRANSPORTS
+    if not isinstance(raw, list) or not all(isinstance(t, str) for t in raw):
+        raise MatrixError(
+            f'sdks.{sdk}.{line}.transports: must be a list of strings'
+        )
+    if not raw:
+        raise MatrixError(
+            f'sdks.{sdk}.{line}.transports: must not be empty; omit the key '
+            f'to mean all of {sorted(ALL_TRANSPORTS)}'
+        )
+    unknown = sorted(set(raw) - ALL_TRANSPORTS)
+    if unknown:
+        raise MatrixError(
+            f'sdks.{sdk}.{line}.transports: unknown transport(s) {unknown}; '
+            f'valid: {sorted(ALL_TRANSPORTS)}'
+        )
+    return frozenset(raw)
 
 
 def _default_matrix_path() -> Path:

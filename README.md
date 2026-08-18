@@ -91,12 +91,13 @@ Within these transport scenarios, the following A2A features can be tested:
 
 - `protos/instruction.proto`: The single source for the traversal instruction message. Every SDK's agent generates its stubs from this file.
 - `pyproto/`: Python stubs generated from `protos/instruction.proto` (committed; regenerate with `./build_protos.sh`).
-- `matrix.yaml`: Maps each scenario-level agent identifier (`python_v10`, `go_v03`, …) to the SDK repo and ref the launcher fetches it from.
+- `matrix.yaml`: Maps each (sdk, line) pair to the repo, ref, and transports the launcher fetches and drives it with. The single source for what a peer identifier like `python_v10` or `go_v03` means.
 - `test_suite/launcher/`: The launcher engine — fetch, cache, build, spawn, health-check, and tear down a cluster of agents at given repo+SHA.
-- `test_suite/`: Agent identifier registry and the Eulerian traversal logic that turns a scenario into a nested instruction.
-- `scenarios/smoke.json`: Default scenario set for `run_tests.py` — peers only, so it runs with no SDK checked out.
+- `test_suite/scenarios/`: The scenario schemas, and the resolver that binds a role-based scenario to concrete agents via `matrix.yaml`.
+- `test_suite/`: The Eulerian traversal logic that turns a scenario into a nested instruction.
+- `scenarios/`: The shared scenario sets — `traversal/pr.yaml`, `traversal/nightly.yaml`, and `traversal/smoke.yaml`, plus the legacy `smoke.json` kept as a compatibility pin.
 - `dashboard/`: Static web assets (HTML, JS, CSS) for rendering compatibility matrix test results.
-- `scripts/`: Auxiliary utilities, including result-parsing metrics pipelines.
+- `scripts/`: Auxiliary utilities — the shared `run_itk.sh` driver, result reporting, nightly metrics, and the scenario coverage diff. See [`scripts/README.md`](scripts/README.md).
 - `itk_runner.py`: The scenario execution pipeline — plan, start a cluster, run, tear down. Shared by both front ends below.
 - `itk_service_v2.py`: HTTP `/run` handler, for CI. A thin wrapper over `itk_runner`.
 - `run_tests.py`: Local CLI, for running scenarios on your own machine. Also a thin wrapper over `itk_runner`.
@@ -120,6 +121,7 @@ a scenario that doesn't reference `current` needs nothing checked out but this r
 ```bash
 uv run run_tests.py                              # the bundled smoke set
 uv run run_tests.py --scenarios path/to/x.json   # any SDK's scenarios.json
+uv run run_tests.py --scenarios scenarios/traversal/pr.yaml   # the shared set
 uv run run_tests.py --sdks python_v10,go_v10     # narrow to those peers
 uv run run_tests.py --list-sdks                  # what matrix.yaml can resolve
 uv run run_tests.py --dry-run                    # plan only, no network
@@ -135,6 +137,75 @@ uv run run_tests.py --mount ~/Source/a2a-python/itk \
 
 `run_tests.py` and the HTTP `/run` handler share one pipeline ([`itk_runner.py`](itk_runner.py)), so
 a scenario behaves the same locally and in CI.
+
+### Scenario formats
+
+Two formats are live at once, and `/run` accepts either — including a batch mixing both. That is
+what lets each SDK move to the shared set on its own schedule instead of all five cutting over
+together.
+
+**Legacy** — what every SDK's `itk/scenarios.json` uses today. Agents are named individually and
+edges are written out by hand. Unchanged, and still fully supported:
+
+```json
+{"tests": [{
+  "name": "Star Topology (Full) - JSONRPC & GRPC",
+  "sdks": ["current", "python_v10", "go_v03"],
+  "edges": ["0->1", "0->2", "1->0", "2->0"],
+  "protocols": ["jsonrpc", "grpc"],
+  "behavior": "send_message"
+}]}
+```
+
+**`traversal/v1`** — names *roles* instead, and resolves them against `matrix.yaml` at run time.
+The same scenario:
+
+```yaml
+schema: traversal/v1
+name: Star - send message
+tier: pr                      # pr | nightly
+roles:
+  sut: current
+  peers:
+    - {sdk: python, line: v10}
+    - {sdk: go, line: v03}
+topology: star                # star | chain | euler — replaces hand-written edges
+transports: [jsonrpc, grpc]
+behavior: send_message
+```
+
+A file carrying a top-level `schema:` key is read as the new format; one without it is legacy.
+Beyond roles and topology, the new format adds:
+
+| Field | Effect |
+| --- | --- |
+| `peers: all` | Every line in `matrix.yaml` — so adding an SDK is a matrix change and nothing else |
+| `expand: per_peer` | One SUT-plus-one scenario per peer, instead of one graph holding all of them |
+| `include_own_lines` | Also test the SUT against its own SDK's released lines |
+| `behaviors`, `transport_sets`, `streaming_variants` | Expand as a Cartesian product |
+| `test_when: {sut_sdk: [...]}` | Restrict a shared scenario to certain SUTs |
+| `edges` | Escape hatch — an explicit edge list, overriding `topology` |
+| `expected: pass \| fail` | The scenario's designed outcome |
+
+Together these collapse the 32-entry nightly set each repo maintained by hand into three
+declarations ([`scenarios/traversal/nightly.yaml`](scenarios/traversal/nightly.yaml)).
+
+Validate before running — a malformed scenario otherwise surfaces only after CI has built
+everything, and one that resolves to nothing would go green having tested less than it claims:
+
+```bash
+uv run python -m test_suite.scenarios.validate --resolve scenarios/
+```
+
+Check that a shared set still covers what a repo's own file did. The comparison is at the level of
+hops actually exercised — `(caller, callee, transport, behavior, streaming)` — so it sees through
+the reshaping. Added coverage is reported, never an error; lost coverage fails:
+
+```bash
+uv run python scripts/scenarios_diff.py \
+    --old ../a2a-python/itk/scenarios.json \
+    --new scenarios/traversal/pr.yaml --sut-sdk python
+```
 
 Two things to know. Builds run on your machine with each SDK's native toolchain, so you need
 whatever the selected peers require (uv, go + `protoc-gen-go`, cargo, mvn + JDK, npm) — the bundled

@@ -1,0 +1,57 @@
+# Nightly: the SUT against every peer in matrix.yaml, one pair at a time.
+#
+# Replaces the 32-entry hand-written `scenarios_full.json` that a2a-python,
+# a2a-go and a2a-js each carried a near-copy of. Those were a Cartesian
+# product written out by hand — 8 peers x 4 behaviour/streaming combinations
+# — which is exactly how the three copies drifted apart. Here the product is
+# declared once and `peers: all` reads the peer list from matrix.yaml, so
+# adding an SDK is a matrix change and nothing else.
+#
+# `expand: per_peer` is what makes these pairwise: one SUT-plus-one scenario
+# per peer, rather than one graph holding every peer. A peer that speaks only
+# some of the requested transports runs over the ones it does speak — that is
+# how "current vs go_v03" ends up on jsonrpc+grpc while "current vs
+# python_v10" gets all three, without either being written out by hand.
+#
+# The three entries below are separate because behaviour and streaming are
+# not independent: push notifications are delivered out of band so streaming
+# is meaningless, and resubscribe only exists for a streaming subscription.
+# A single scenario with both plural axes would emit those two nonsense
+# combinations.
+
+tests:
+  - schema: traversal/v1
+    name: Nightly - current vs {peer} - send message
+    tier: nightly
+    roles:
+      sut: current
+      peers: all
+    expand: per_peer
+    topology: star
+    transports: [jsonrpc, grpc, http_json]
+    behavior: send_message
+    streaming_variants: [false, true]
+
+  - schema: traversal/v1
+    name: Nightly - current vs {peer} - push notification
+    tier: nightly
+    roles:
+      sut: current
+      peers: all
+    expand: per_peer
+    topology: star
+    transports: [jsonrpc, grpc, http_json]
+    behavior: push_notification
+    streaming: false
+
+  - schema: traversal/v1
+    name: Nightly - current vs {peer} - resubscribe
+    tier: nightly
+    roles:
+      sut: current
+      peers: all
+    expand: per_peer
+    topology: star
+    transports: [jsonrpc, grpc, http_json]
+    behavior: resubscribe
+    streaming: true

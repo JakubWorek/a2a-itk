@@ -1,0 +1,116 @@
+# PR tier: a star of the SUT against a small, fixed peer set.
+#
+# Replaces the per-repo `scenarios.json`. Those had drifted into five
+# different peer sets — a2a-python and a2a-go used the same four, a2a-java
+# swapped one in, a2a-js was pairwise instead of a star, and a2a-rs ran two
+# scenarios against a single peer. The set below is the common core:
+# python and go, both version lines.
+#
+# Peers are listed explicitly rather than via `peers: all`. The full matrix
+# is nine agents per scenario against today's five, and the cost of that on
+# every PR has not been measured yet — the design calls for measuring it
+# before making it the PR default. Nightly already runs the full set.
+#
+# `include_own_lines` adds the SUT's own released lines on top: java_v10 when
+# a2a-java is the SUT, ts_v10 and ts_v03 when a2a-js is. Every repo does this
+# by hand today, because "does my change still work against my own last
+# release?" is a different question from cross-SDK compatibility — and it is
+# the one part of each repo's PR set that a fixed shared peer list cannot
+# express. It needs `sut_sdk` to be passed with the run.
+#
+# The http_json entries name three peers rather than four because go_v03
+# cannot speak it; a2a-python and a2a-java each carried a hand-written
+# "No Go v03 - HTTP_JSON" scenario for the same reason. matrix.yaml records
+# that limit, and `scripts/scenarios_diff.py` checks these lists against it.
+
+tests:
+  - schema: traversal/v1
+    name: PR - star - send message - jsonrpc+grpc
+    tier: pr
+    roles:
+      sut: current
+      include_own_lines: true
+      peers:
+        - {sdk: python, line: v10}
+        - {sdk: python, line: v03}
+        - {sdk: go, line: v10}
+        - {sdk: go, line: v03}
+    topology: star
+    transports: [jsonrpc, grpc]
+    behavior: send_message
+    streaming_variants: [false, true]
+
+  - schema: traversal/v1
+    name: PR - star - send message - http_json
+    tier: pr
+    roles:
+      sut: current
+      include_own_lines: true
+      peers:
+        - {sdk: python, line: v10}
+        - {sdk: python, line: v03}
+        - {sdk: go, line: v10}
+    topology: star
+    transports: [http_json]
+    behavior: send_message
+    streaming_variants: [false, true]
+
+  - schema: traversal/v1
+    name: PR - star - push notification - jsonrpc+grpc
+    tier: pr
+    roles:
+      sut: current
+      include_own_lines: true
+      peers:
+        - {sdk: python, line: v10}
+        - {sdk: python, line: v03}
+        - {sdk: go, line: v10}
+        - {sdk: go, line: v03}
+    topology: star
+    transports: [jsonrpc, grpc]
+    behavior: push_notification
+
+  - schema: traversal/v1
+    name: PR - star - push notification - http_json
+    tier: pr
+    roles:
+      sut: current
+      include_own_lines: true
+      peers:
+        - {sdk: python, line: v10}
+        - {sdk: python, line: v03}
+        - {sdk: go, line: v10}
+    topology: star
+    transports: [http_json]
+    behavior: push_notification
+
+  - schema: traversal/v1
+    name: PR - star - resubscribe - jsonrpc
+    tier: pr
+    roles:
+      sut: current
+      include_own_lines: true
+      peers:
+        - {sdk: python, line: v10}
+        - {sdk: python, line: v03}
+        - {sdk: go, line: v10}
+        - {sdk: go, line: v03}
+    topology: star
+    transports: [jsonrpc]
+    behavior: resubscribe
+    streaming: true
+
+  - schema: traversal/v1
+    name: PR - star - resubscribe - grpc+http_json
+    tier: pr
+    roles:
+      sut: current
+      include_own_lines: true
+      peers:
+        - {sdk: python, line: v10}
+        - {sdk: python, line: v03}
+        - {sdk: go, line: v10}
+    topology: star
+    transports: [grpc, http_json]
+    behavior: resubscribe
+    streaming: true

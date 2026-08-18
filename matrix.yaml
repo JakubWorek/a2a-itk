@@ -1,28 +1,44 @@
-# Matrix: scenario-level agent identifiers → (repo, ref).
+# Matrix: scenario-level agent identifiers → (repo, ref, transports).
 #
 # Consumed by :mod:`test_suite.launcher.matrix`. Scenarios reference peers
-# by identifier ("python_v10", "go_v03", "python_v10_2" — the _N suffix
-# means "second instance of the same source"). This file maps each
-# (sdk, line) pair to the GitHub repo and default ref to fetch. The
-# service resolves the ref to a SHA at plan time via `git ls-remote`, so
-# a symbolic ref like `main` means "latest at run time" (fine for
-# nightly), while a tag or SHA pins the peer.
+# either by identifier ("python_v10", "go_v03", "python_v10_2" — the _N suffix
+# means "second instance of the same source") or, in the traversal/v1 schema,
+# by (sdk, line). This file maps each (sdk, line) pair to the GitHub repo and
+# default ref to fetch. The service resolves the ref to a SHA at plan time via
+# `git ls-remote`, so a symbolic ref like `main` means "latest at run time"
+# (fine for nightly), while a tag or SHA pins the peer.
 #
 # Special case: "current" is the SUT and doesn't map through this file —
 # it's spawned via `Kind.MOUNT` from the container's bind mount.
 #
 # v03 lines point at `+itk` overlay tags: the underlying v0.3.X release
 # with the itk agent grafted onto its `itk/` subdir. `java` and `rust` have no v03.
+#
+# `transports` is the line's capability ceiling. It is used ONLY to expand the
+# `peers: all` macro — a line is included in a scenario only if it supports
+# every transport that scenario requests. A scenario naming its peers
+# explicitly gets exactly those peers, unfiltered, which is what keeps the
+# migrated legacy scenarios behaving identically. Omitted means all three.
 
 sdks:
   python:
     v10: {repo: a2aproject/a2a-python, ref: main}
+    # a2a-python and a2a-go both drive this line over all three transports;
+    # a2a-js only ever drives it over jsonrpc. Recorded as the union, since
+    # the ceiling describes what the line can do, not what each SUT chooses
+    # to exercise.
     v03: {repo: a2aproject/a2a-python, ref: "v0.3.24+itk"}
   go:
     v10: {repo: a2aproject/a2a-go, ref: main}
-    v03: {repo: a2aproject/a2a-go, ref: "v0.3.15+itk"}
+    # The one uncontested restriction: no SDK runs go_v03 over http_json, and
+    # a2a-python and a2a-java both carry an explicit "No Go v03 - HTTP_JSON"
+    # scenario to route around it.
+    v03: {repo: a2aproject/a2a-go, ref: "v0.3.15+itk", transports: [jsonrpc, grpc]}
   ts:
     v10: {repo: a2aproject/a2a-js, ref: main}
+    # Contested: a2a-js drives its own v03 over all three, while a2a-python
+    # and a2a-go only drive it over jsonrpc. Union recorded; worth confirming
+    # against a real run before any `peers: all` scenario leans on it.
     v03: {repo: a2aproject/a2a-js, ref: "v0.3.14+itk"}
   java:
     v10: {repo: a2aproject/a2a-java, ref: main}
