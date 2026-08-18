@@ -193,8 +193,20 @@ class TraversalScenarioV1(BaseModel):
     # Singular or plural, never both — see the validator below.
     behavior: Behavior | None = None
     behaviors: list[Behavior] | None = None
-    transports: list[Transport] | None = None
-    transport_sets: list[list[Transport]] | None = None
+    transports: list[Transport] | None = Field(
+        default=None,
+        description='Transports to cover. Each becomes its OWN scenario, so '
+                    'one failing transport reports as one failure and names '
+                    'itself, instead of sinking every transport in the batch. '
+                    'Use `transport_sets` to deliberately run several in one '
+                    'scenario.',
+    )
+    transport_sets: list[list[Transport]] | None = Field(
+        default=None,
+        description='Explicit groupings, one scenario per group. Only for '
+                    'when several transports genuinely belong in one '
+                    'traversal; prefer `transports`.',
+    )
     streaming: bool | None = None
     streaming_variants: list[bool] | None = None
 
@@ -249,9 +261,19 @@ class TraversalScenarioV1(BaseModel):
         return self.behaviors if self.behaviors is not None else [self.behavior]  # type: ignore[list-item]
 
     def transport_variants(self) -> list[list[Transport]]:
+        """One entry per scenario to emit.
+
+        ``transports`` splits — ``[jsonrpc, grpc]`` is two scenarios, not one
+        carrying both. A traversal runs a separate circuit per transport and
+        asserts the union of their trace tokens, so bundling them means any
+        one transport failing marks the whole scenario failed, and the result
+        name doesn't say which. Splitting makes each transport its own
+        pass/fail, which is also what lets a known failure be excluded at
+        transport granularity.
+        """
         if self.transport_sets is not None:
             return self.transport_sets
-        return [self.transports]  # type: ignore[list-item]
+        return [[t] for t in self.transports]  # type: ignore[union-attr]
 
     def streaming_options(self) -> list[bool]:
         if self.streaming_variants is not None:

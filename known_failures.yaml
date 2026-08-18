@@ -1,0 +1,35 @@
+# Combinations deliberately left out of every run.
+#
+# Read by :mod:`test_suite.scenarios.exclusions` and applied to resolved
+# scenarios just before they run. Anything excluded is listed in the run
+# output with its reason — an exclusion nobody can see is indistinguishable
+# from silently lost coverage.
+#
+# This is for combinations that are BROKEN. A version line that simply does
+# not speak a transport is a different thing: put that in `matrix.yaml` under
+# the line's `transports`, where it also stops the peer being selected in the
+# first place, rather than selecting it and then skipping it here.
+#
+# Because transports are one-per-scenario by default, a rule can name a
+# single transport without taking the others down with it.
+#
+# Fields (all optional except `reason`; the ones you set must all match):
+#   agents      any of these agent ids taking part
+#   transports  any of these transports in use
+#   behaviors   one of these behaviours
+#   streaming   true or false
+#   reason      required — why this is excluded
+#   issue       optional link
+#
+# Worked example:
+#
+#   exclusions:
+#     - agents: [go_v03]
+#       behaviors: [push_notification]
+#       transports: [grpc]
+#       reason: >
+#         go v0.3 never delivers the second push for a grpc hop; the
+#         traversal times out waiting for it.
+#       issue: https://github.com/a2aproject/a2a-go/issues/NNN
+
+exclusions: []

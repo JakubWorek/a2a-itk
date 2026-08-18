@@ -309,15 +309,25 @@ class TestTransports:
                 'repo': 'a/b', 'ref': 'main', 'transports': 'jsonrpc',
             }}}})
 
-    def test_default_matrix_restricts_only_go_v03(self):
-        """The one uncontested capability limit in the shipping corpus: no SDK
-        drives go_v03 over http_json. Everything else is unrestricted."""
+    def test_default_matrix_restricts_only_the_v03_lines_that_need_it(self):
+        """Both limits are evidence-backed, not guesses.
+
+        go_v03: no SDK has ever driven it over http_json, and two repos carry
+        an explicit "No Go v03 - HTTP_JSON" scenario.
+
+        ts_v03: a2a-js's scenario file claimed all three while a2a-python's
+        and a2a-go's claimed jsonrpc; the first shared-set nightly failed on
+        grpc and http_json, settling it.
+        """
         m = Matrix.from_default()
         restricted = {
             e.agent_id: sorted(e.transports)
             for e in m.entries() if e.transports != ALL_TRANSPORTS
         }
-        assert restricted == {'go_v03': ['grpc', 'jsonrpc']}
+        assert restricted == {
+            'go_v03': ['grpc', 'jsonrpc'],
+            'ts_v03': ['jsonrpc'],
+        }
 
 
 class TestEntries:

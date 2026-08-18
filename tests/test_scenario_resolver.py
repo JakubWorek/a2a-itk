@@ -102,17 +102,24 @@ class TestPeersAllMacro:
         assert 'go_v03' not in s.sdks
         assert 'go_v10' in s.sdks
 
-    def test_requires_all_requested_transports(self):
-        [s] = resolve(_one(roles={'peers': 'all'},
+    def test_each_transport_is_filtered_independently(self):
+        """Transports split, so go_v03 leaves the http_json graph but stays in
+        the jsonrpc one — from a single declaration."""
+        out = resolve(_one(roles={'peers': 'all'},
                            transports=['jsonrpc', 'http_json']), MATRIX)
-        assert 'go_v03' not in s.sdks
+        by_transport = {s.protocols[0]: s.sdks for s in out}
+        assert 'go_v03' in by_transport['jsonrpc']
+        assert 'go_v03' not in by_transport['http_json']
 
-    def test_explicit_peers_are_never_filtered(self):
-        """The author named this peer. Dropping it would quietly change what a
-        migrated scenario covers."""
-        [s] = resolve(_one(roles={'peers': [{'sdk': 'go', 'line': 'v03'}]},
-                           transports=['http_json']), MATRIX)
-        assert s.sdks == ['current', 'go_v03']
+    def test_explicit_peers_are_filtered_too(self):
+        """A peer that can't speak the transport has to leave the graph — the
+        hop to it would fail and take the traversal with it. Naming it
+        explicitly doesn't change that, and it is what lets one declaration
+        replace the hand-written "No Go v03 - HTTP_JSON" pair."""
+        [s] = resolve(_one(roles={'peers': [
+            {'sdk': 'go', 'line': 'v03'}, {'sdk': 'python', 'line': 'v10'},
+        ]}, transports=['http_json']), MATRIX)
+        assert s.sdks == ['current', 'python_v10']
 
     def test_expansion_order_is_stable(self):
         """Edge indices are positional, so an unstable peer order would make
@@ -122,6 +129,46 @@ class TestPeersAllMacro:
         assert a == b
         assert a[0] == 'current'
         assert a[1:] == sorted(a[1:])
+
+
+class TestTransportsSplit:
+    """`transports` emits one scenario per transport, not one carrying all.
+
+    A traversal runs a separate circuit per transport and asserts the union of
+    their trace tokens, so bundling them means one bad transport marks the
+    whole scenario failed without saying which. That is exactly how the first
+    shared-set nightly reported ts_v03: a single FAILED line for a scenario
+    where only grpc and http_json were broken.
+    """
+
+    def test_one_scenario_per_transport(self):
+        out = resolve(_one(transports=['jsonrpc', 'grpc', 'http_json']), MATRIX)
+        assert [s.protocols for s in out] == [
+            ['jsonrpc'], ['grpc'], ['http_json'],
+        ]
+
+    def test_transport_is_named(self):
+        out = resolve(_one(name='S', transports=['jsonrpc', 'grpc']), MATRIX)
+        assert [s.name for s in out] == ['S - jsonrpc', 'S - grpc']
+
+    def test_single_transport_adds_no_suffix(self):
+        [s] = resolve(_one(name='S', transports=['jsonrpc']), MATRIX)
+        assert s.name == 'S'
+
+    def test_transport_sets_still_group_deliberately(self):
+        """The escape hatch, for a traversal that genuinely needs several."""
+        [s] = resolve(_one(transports=None,
+                           transport_sets=[['jsonrpc', 'grpc']]), MATRIX)
+        assert s.protocols == ['jsonrpc', 'grpc']
+
+    def test_legacy_scenarios_keep_their_bundle(self):
+        """Legacy files are not reinterpreted — `protocols` stays one scenario."""
+        scenarios = parse_tests({'tests': [{
+            'name': 'old', 'sdks': ['current', 'go_v10'],
+            'behavior': 'send_message', 'protocols': ['jsonrpc', 'grpc'],
+        }]})
+        [s] = resolve(scenarios, MATRIX)
+        assert s.protocols == ['jsonrpc', 'grpc']
 
 
 class TestTopologyExpansion:
@@ -237,10 +284,12 @@ class TestLegacyPassthrough:
 
 
 class TestBundledSmokeEquivalence:
-    """scenarios/traversal/smoke.yaml must resolve exactly like smoke.json.
+    """scenarios/traversal/smoke.yaml must cover exactly what smoke.json does.
 
     The worked example of a migration, and the pattern Story 2.3 applies to
-    the rest of the corpus.
+    the rest of the corpus. Compared hop by hop rather than scenario by
+    scenario: the YAML splits transports, so it produces more scenarios over
+    the same traversals, which is the whole point of splitting.
     """
 
     def _load(self, name):
@@ -249,17 +298,26 @@ class TestBundledSmokeEquivalence:
         root = Path(__file__).resolve().parents[1]
         return resolve(load_file(root / 'scenarios' / name), Matrix.from_default())
 
-    def _key(self, s):
-        return (
-            s.name, tuple(s.sdks), s.behavior,
-            tuple(sorted(s.protocols or [])), s.streaming,
-            normalize_edges(s.edges, len(s.sdks)),
-        )
+    def _hops(self, scenarios):
+        out = set()
+        for s in scenarios:
+            edges = normalize_edges(s.edges, len(s.sdks))
+            for edge in edges:
+                u, v = (int(x) for x in edge.split('->'))
+                for t in s.protocols or []:
+                    out.add((s.sdks[u], s.sdks[v], t, s.behavior, s.streaming))
+        return out
 
-    def test_identical(self):
-        old = {self._key(s) for s in self._load('smoke.json')}
-        new = {self._key(s) for s in self._load('traversal/smoke.yaml')}
+    def test_covers_the_same_hops(self):
+        old = self._hops(self._load('smoke.json'))
+        new = self._hops(self._load('traversal/smoke.yaml'))
         assert new == old
+
+    def test_yaml_splits_into_more_scenarios(self):
+        """Same coverage, finer reporting."""
+        assert len(self._load('traversal/smoke.yaml')) > len(
+            self._load('smoke.json')
+        )
 
 
 class TestExpandPerPeer:
@@ -283,15 +341,16 @@ class TestExpandPerPeer:
                            expand='per_peer'), MATRIX)
         assert 'vs go_v10 - send' in [s.name for s in out]
 
-    def test_transports_are_intersected_not_dropped(self):
-        """Unlike `together`, a partially-capable peer still runs — over the
-        transports it does speak. This is what reproduces "current vs go_v03"
-        on jsonrpc+grpc beside "current vs python_v10" on all three."""
+    def test_a_peer_gets_only_the_transports_it_speaks(self):
+        """Each (peer, transport) is its own scenario, so a partially-capable
+        peer simply has fewer of them rather than being dropped entirely."""
         out = resolve(_one(roles={'peers': 'all'}, expand='per_peer',
                            transports=['jsonrpc', 'grpc', 'http_json']), MATRIX)
-        by_peer = {s.sdks[1]: s.protocols for s in out}
-        assert by_peer['go_v03'] == ['jsonrpc', 'grpc']
-        assert by_peer['python_v10'] == ['jsonrpc', 'grpc', 'http_json']
+        by_peer: dict[str, list[str]] = {}
+        for s in out:
+            by_peer.setdefault(s.sdks[1], []).append(s.protocols[0])
+        assert sorted(by_peer['go_v03']) == ['grpc', 'jsonrpc']
+        assert sorted(by_peer['python_v10']) == ['grpc', 'http_json', 'jsonrpc']
 
     def test_peer_sharing_no_transport_is_skipped(self):
         out = resolve(_one(roles={'peers': 'all'}, expand='per_peer',

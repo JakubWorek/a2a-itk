@@ -162,8 +162,13 @@ def prepare(raw_tests: object, *, sut_sdk: str | None = None) -> list[Scenario]:
             peer the matrix doesn't have, or can't be bound.
     """
     report = resolve_all(parse_tests(raw_tests), get_matrix(), sut_sdk=sut_sdk)
-    for name, why in report.skipped:
-        logger.info('Skipping %r: %s', name, why)
+    if report.skipped:
+        # Logged at warning, individually: a skip that scrolls past unnoticed
+        # is indistinguishable from coverage that quietly vanished.
+        logger.warning('%d scenario(s) skipped:', len(report.skipped))
+        for name, why in report.skipped:
+            logger.warning('  %s — %s', name, why)
+    logger.info('%d scenario(s) to run', len(report.scenarios))
     return report.scenarios
 
 

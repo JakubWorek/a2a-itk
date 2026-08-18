@@ -182,13 +182,48 @@ Beyond roles and topology, the new format adds:
 | `peers: all` | Every line in `matrix.yaml` — so adding an SDK is a matrix change and nothing else |
 | `expand: per_peer` | One SUT-plus-one scenario per peer, instead of one graph holding all of them |
 | `include_own_lines` | Also test the SUT against its own SDK's released lines |
-| `behaviors`, `transport_sets`, `streaming_variants` | Expand as a Cartesian product |
+| `behaviors`, `streaming_variants` | Expand as a Cartesian product |
+| `transport_sets` | Group several transports into one scenario (see below) |
 | `test_when: {sut_sdk: [...]}` | Restrict a shared scenario to certain SUTs |
 | `edges` | Escape hatch — an explicit edge list, overriding `topology` |
 | `expected: pass \| fail` | The scenario's designed outcome |
 
 Together these collapse the 32-entry nightly set each repo maintained by hand into three
 declarations ([`scenarios/traversal/nightly.yaml`](scenarios/traversal/nightly.yaml)).
+
+**Each transport is its own scenario.** `transports: [jsonrpc, grpc]` emits two scenarios, not
+one carrying both. A traversal runs a separate circuit per transport and asserts the union of
+their trace tokens, so a bundled scenario fails as a whole when any single transport is broken —
+and the result name doesn't say which. Splitting gives each transport its own pass/fail, and is
+what lets a known failure be excluded at transport granularity. Use `transport_sets` when several
+genuinely belong in one traversal.
+
+A peer that can't speak a transport leaves that scenario only, based on the line's `transports`
+in `matrix.yaml`. That is why the shared PR set has no separate "no go_v03, http_json" variant —
+the capability is stated once, in the matrix, and the resolver acts on it.
+
+### Known failures
+
+Combinations that are *broken* — as opposed to merely unsupported — go in
+[`known_failures.yaml`](known_failures.yaml). Generated scenarios can't carry an inline marker
+(with `peers: all` there is no entry in any file to annotate), so the exceptions live in one list
+matched against resolved scenarios:
+
+```yaml
+exclusions:
+  - agents: [go_v03]
+    behaviors: [push_notification]
+    transports: [grpc]
+    reason: go v0.3 never delivers the second push for a grpc hop.
+    issue: https://github.com/a2aproject/a2a-go/issues/NNN
+```
+
+`reason` is required, and every exclusion is logged on every run — an exclusion nobody can see is
+indistinguishable from coverage that quietly disappeared. A capability limit belongs in
+`matrix.yaml` instead, where it also stops the peer being selected in the first place.
+
+`scripts/scenarios_diff.py` knows about both files: coverage may shrink only where one of them
+explains why, and an unexplained drop fails the check.
 
 Validate before running — a malformed scenario otherwise surfaces only after CI has built
 everything, and one that resolves to nothing would go green having tested less than it claims:

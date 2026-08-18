@@ -18,14 +18,15 @@
 # the one part of each repo's PR set that a fixed shared peer list cannot
 # express. It needs `sut_sdk` to be passed with the run.
 #
-# The http_json entries name three peers rather than four because go_v03
-# cannot speak it; a2a-python and a2a-java each carried a hand-written
-# "No Go v03 - HTTP_JSON" scenario for the same reason. matrix.yaml records
-# that limit, and `scripts/scenarios_diff.py` checks these lists against it.
+# Each transport becomes its own scenario, and a peer that cannot speak one
+# drops out of that scenario only. So the three entries below cover what took
+# six before: there is no separate "no go_v03, http_json" variant, because
+# matrix.yaml already records that go_v03 has no http_json and the resolver
+# acts on it.
 
 tests:
   - schema: traversal/v1
-    name: PR - star - send message - jsonrpc+grpc
+    name: PR - star - send message
     tier: pr
     roles:
       sut: current
@@ -36,27 +37,12 @@ tests:
         - {sdk: go, line: v10}
         - {sdk: go, line: v03}
     topology: star
-    transports: [jsonrpc, grpc]
+    transports: [jsonrpc, grpc, http_json]
     behavior: send_message
     streaming_variants: [false, true]
 
   - schema: traversal/v1
-    name: PR - star - send message - http_json
-    tier: pr
-    roles:
-      sut: current
-      include_own_lines: true
-      peers:
-        - {sdk: python, line: v10}
-        - {sdk: python, line: v03}
-        - {sdk: go, line: v10}
-    topology: star
-    transports: [http_json]
-    behavior: send_message
-    streaming_variants: [false, true]
-
-  - schema: traversal/v1
-    name: PR - star - push notification - jsonrpc+grpc
+    name: PR - star - push notification
     tier: pr
     roles:
       sut: current
@@ -67,25 +53,11 @@ tests:
         - {sdk: go, line: v10}
         - {sdk: go, line: v03}
     topology: star
-    transports: [jsonrpc, grpc]
+    transports: [jsonrpc, grpc, http_json]
     behavior: push_notification
 
   - schema: traversal/v1
-    name: PR - star - push notification - http_json
-    tier: pr
-    roles:
-      sut: current
-      include_own_lines: true
-      peers:
-        - {sdk: python, line: v10}
-        - {sdk: python, line: v03}
-        - {sdk: go, line: v10}
-    topology: star
-    transports: [http_json]
-    behavior: push_notification
-
-  - schema: traversal/v1
-    name: PR - star - resubscribe - jsonrpc
+    name: PR - star - resubscribe
     tier: pr
     roles:
       sut: current
@@ -96,21 +68,6 @@ tests:
         - {sdk: go, line: v10}
         - {sdk: go, line: v03}
     topology: star
-    transports: [jsonrpc]
-    behavior: resubscribe
-    streaming: true
-
-  - schema: traversal/v1
-    name: PR - star - resubscribe - grpc+http_json
-    tier: pr
-    roles:
-      sut: current
-      include_own_lines: true
-      peers:
-        - {sdk: python, line: v10}
-        - {sdk: python, line: v03}
-        - {sdk: go, line: v10}
-    topology: star
-    transports: [grpc, http_json]
+    transports: [jsonrpc, grpc, http_json]
     behavior: resubscribe
     streaming: true

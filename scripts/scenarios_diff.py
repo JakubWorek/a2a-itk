@@ -24,7 +24,10 @@ reshaping right by construction:
   * a pairwise scenario covers the same pair inside someone else's star.
 
 Coverage may grow — that is the point of merging five sets — so extra tuples
-are reported and never fail. Coverage may not shrink.
+are reported and never fail. Coverage may only shrink for a stated reason:
+either the peer cannot speak that transport (``matrix.yaml``) or the
+combination is a recorded known failure (``known_failures.yaml``). A hop that
+disappears for neither reason fails the check.
 
 Usage::
 
@@ -43,7 +46,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from test_suite.launcher.matrix import Matrix
+from test_suite.launcher.matrix import Matrix, MatrixError
+from test_suite.scenarios.exclusions import KnownFailures
 from test_suite.scenarios.loader import ScenarioFileError, load_file
 from test_suite.scenarios.resolver import ResolutionError, ResolvedScenario, resolve
 
@@ -85,11 +89,46 @@ def describe(a: Atom) -> str:
     )
 
 
-def load(paths: list[Path], matrix: Matrix, sut_sdk: str | None) -> list[ResolvedScenario]:
+def load(
+    paths: list[Path],
+    matrix: Matrix,
+    sut_sdk: str | None,
+    known_failures: KnownFailures | None = None,
+) -> list[ResolvedScenario]:
     scenarios: list = []
     for p in paths:
         scenarios.extend(load_file(p))
-    return resolve(scenarios, matrix, sut_sdk=sut_sdk)
+    return resolve(
+        scenarios, matrix, sut_sdk=sut_sdk, known_failures=known_failures,
+    )
+
+
+def explain_drop(a: Atom, matrix: Matrix, known: KnownFailures) -> str | None:
+    """Why this hop is legitimately no longer tested, or None if it isn't.
+
+    Two acceptable reasons, both written down somewhere a reader can check:
+    the peer has no such transport, or the combination is a known failure.
+    """
+    caller, callee, transport, behavior, streaming = a
+
+    for agent in (caller, callee):
+        try:
+            entry = matrix.resolve(agent)
+        except MatrixError:
+            continue  # 'current' and friends aren't matrix lines
+        if transport not in entry.transports:
+            return (
+                f'matrix.yaml: {agent} does not speak {transport} '
+                f'(has {sorted(entry.transports)})'
+            )
+
+    hit = known.find(
+        sdks=[caller, callee], protocols=[transport],
+        behavior=behavior, streaming=streaming,
+    )
+    if hit is not None:
+        return f'known_failures.yaml: {hit.describe()}'
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911
@@ -102,12 +141,19 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911
                         help='SUT, for evaluating test_when on the new set.')
     parser.add_argument('--show-extra', action='store_true',
                         help='List the added coverage as well as summarising it.')
+    parser.add_argument('--ignore-known-failures', action='store_true',
+                        help='Resolve the new set as if known_failures.yaml '
+                             'were empty, to see its full potential coverage.')
     args = parser.parse_args(argv)
 
     matrix = Matrix.from_default()
+    known = KnownFailures() if args.ignore_known_failures else KnownFailures.from_default()
     try:
-        old = load(args.old, matrix, None)
-        new = load(args.new, matrix, args.sut_sdk)
+        # The legacy side is resolved with exclusions off: it is the baseline
+        # of what used to run, and applying today's exclusions to it would
+        # hide exactly the drops this tool exists to surface.
+        old = load(args.old, matrix, None, KnownFailures())
+        new = load(args.new, matrix, args.sut_sdk, known)
     except (ScenarioFileError, ResolutionError) as e:
         print(f'ERROR: {e}', file=sys.stderr)
         return 1
@@ -122,10 +168,24 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911
     print(f'new: {len(new):>3} scenarios -> {len(new_atoms):>4} hops covered')
     print(f'retained: {len(old_atoms) - len(missing)}/{len(old_atoms)}')
 
-    if missing:
-        print(f'\nMISSING — exercised by the legacy set, not by the new one '
-              f'({len(missing)}):')
-        for a in sorted(missing):
+    explained: list[tuple[Atom, str]] = []
+    unexplained: list[Atom] = []
+    for a in sorted(missing):
+        why = explain_drop(a, matrix, known)
+        (explained.append((a, why)) if why else unexplained.append(a))
+
+    if explained:
+        by_reason: dict[str, int] = defaultdict(int)
+        for _, why in explained:
+            by_reason[why] += 1
+        print(f'\nDROPPED for a stated reason ({len(explained)} hops):')
+        for why, n in sorted(by_reason.items()):
+            print(f'  ~ {why}  ({n} hops)')
+
+    if unexplained:
+        print(f'\nMISSING — exercised by the legacy set, not by the new one, '
+              f'and nothing says why ({len(unexplained)}):')
+        for a in unexplained:
             print(f'  - {describe(a)}')
 
     if extra:
@@ -139,11 +199,16 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911
             for a in sorted(extra):
                 print(f'      {describe(a)}')
 
-    if missing:
-        print(f'\nFAIL: {len(missing)} hop(s) would stop being tested.')
+    if unexplained:
+        print(f'\nFAIL: {len(unexplained)} hop(s) would stop being tested with '
+              f'no reason recorded. Either restore them, or record why in '
+              f'matrix.yaml (capability) or known_failures.yaml (defect).')
         return 1
-    print('\nOK: all legacy coverage retained'
-          + (f', plus {len(extra)} new hops.' if extra else '.'))
+
+    summary = 'OK: all legacy coverage retained'
+    if explained:
+        summary = f'OK: {len(explained)} hop(s) dropped for stated reasons'
+    print(f'\n{summary}' + (f', plus {len(extra)} new hops.' if extra else '.'))
     return 0
 
 

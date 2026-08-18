@@ -12,8 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from scripts.scenarios_diff import atoms, main
+from scripts.scenarios_diff import atoms, explain_drop, main
 from test_suite.launcher.matrix import Matrix
+from test_suite.scenarios.exclusions import KnownFailures
 from test_suite.scenarios.loader import load_file, parse_tests
 from test_suite.scenarios.resolver import resolve
 
@@ -146,15 +147,22 @@ class TestShippingCorpus:
             pytest.skip(f'{repo} not checked out beside a2a-itk')
 
         matrix = Matrix.from_default()
-        old = resolve(load_file(legacy), matrix)
-        new = resolve(load_file(shared), matrix, sut_sdk=sdk)
+        known = KnownFailures.from_default()
+        old = resolve(load_file(legacy), matrix, known_failures=KnownFailures())
+        new = resolve(load_file(shared), matrix, sut_sdk=sdk, known_failures=known)
 
         old_atoms = set().union(*(atoms(s) for s in old))
         new_atoms = set().union(*(atoms(s) for s in new))
-        missing = old_atoms - new_atoms
-        assert not missing, (
-            f'{repo}/{legacy_name}: {len(missing)} hop(s) would stop being '
-            f'tested, e.g. {sorted(missing)[:3]}'
+
+        # Coverage may shrink only where something says why: a capability
+        # limit in matrix.yaml, or a recorded defect in known_failures.yaml.
+        unexplained = [
+            a for a in old_atoms - new_atoms
+            if explain_drop(a, matrix, known) is None
+        ]
+        assert not unexplained, (
+            f'{repo}/{legacy_name}: {len(unexplained)} hop(s) would stop being '
+            f'tested with no reason recorded, e.g. {sorted(unexplained)[:3]}'
         )
 
     def test_pr_coverage_retained(self, repo, sdk):
@@ -172,10 +180,28 @@ class TestSharedSetIsValid:
         assert resolve(load_file(path), Matrix.from_default())
 
     def test_nightly_expands_to_the_full_pairwise_product(self):
-        """8 peers x (send_message x2 streaming, push, resubscribe) = 32,
-        from three declarations."""
+        """From three declarations.
+
+        Transports split, and each peer only gets the ones it speaks:
+        6 unrestricted lines x 3 transports, plus go_v03 x 2, plus ts_v03 x 1
+        = 21 (peer, transport) pairs. Times four behaviour/streaming
+        combinations — send_message non-streaming and streaming, push
+        notification, resubscribe — gives 84.
+        """
         out = resolve(load_file(SHARED_NIGHTLY), Matrix.from_default())
-        assert len(out) == 32
+        assert len(out) == 21 * 4
+
+    def test_every_nightly_scenario_is_single_transport(self):
+        """One transport per scenario is what makes a failure name itself."""
+        for s in resolve(load_file(SHARED_NIGHTLY), Matrix.from_default()):
+            assert len(s.protocols) == 1, s.name
+
+    def test_ts_v03_is_jsonrpc_only(self):
+        """Regression: the first shared nightly failed on ts_v03 over grpc and
+        http_json, which a2a-js's file had claimed worked."""
+        for s in resolve(load_file(SHARED_NIGHTLY), Matrix.from_default()):
+            if 'ts_v03' in s.sdks:
+                assert s.protocols == ['jsonrpc'], s.name
 
     def test_go_v03_never_gets_http_json(self):
         """The one uncontested capability limit in the corpus."""

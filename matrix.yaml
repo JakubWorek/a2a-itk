@@ -24,22 +24,21 @@ sdks:
   python:
     v10: {repo: a2aproject/a2a-python, ref: main}
     # a2a-python and a2a-go both drive this line over all three transports;
-    # a2a-js only ever drives it over jsonrpc. Recorded as the union, since
-    # the ceiling describes what the line can do, not what each SUT chooses
-    # to exercise.
+    # a2a-js only ever drives it over jsonrpc. The permissive reading is
+    # recorded because two independent SUTs exercise it green today.
     v03: {repo: a2aproject/a2a-python, ref: "v0.3.24+itk"}
   go:
     v10: {repo: a2aproject/a2a-go, ref: main}
-    # The one uncontested restriction: no SDK runs go_v03 over http_json, and
-    # a2a-python and a2a-java both carry an explicit "No Go v03 - HTTP_JSON"
-    # scenario to route around it.
+    # No SDK runs go_v03 over http_json, and a2a-python and a2a-java both
+    # carry an explicit "No Go v03 - HTTP_JSON" scenario to route around it.
     v03: {repo: a2aproject/a2a-go, ref: "v0.3.15+itk", transports: [jsonrpc, grpc]}
   ts:
     v10: {repo: a2aproject/a2a-js, ref: main}
-    # Contested: a2a-js drives its own v03 over all three, while a2a-python
-    # and a2a-go only drive it over jsonrpc. Union recorded; worth confirming
-    # against a real run before any `peers: all` scenario leans on it.
-    v03: {repo: a2aproject/a2a-js, ref: "v0.3.14+itk"}
+    # jsonrpc only. a2a-js's own scenario file claimed all three while
+    # a2a-python's and a2a-go's claimed jsonrpc, and the first shared-set
+    # nightly settled it: grpc and http_json both fail against this overlay
+    # tag. The narrow reading was the correct one.
+    v03: {repo: a2aproject/a2a-js, ref: "v0.3.14+itk", transports: [jsonrpc]}
   java:
     v10: {repo: a2aproject/a2a-java, ref: main}
   rust:

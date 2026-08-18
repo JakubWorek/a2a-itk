@@ -22,6 +22,7 @@ import itertools
 from dataclasses import dataclass, field
 
 from test_suite.launcher.matrix import Matrix, MatrixError
+from test_suite.scenarios.exclusions import KnownFailures
 from test_suite.scenarios.schema import (
     PEER_PLACEHOLDER,
     SUT_ID,
@@ -82,9 +83,12 @@ def resolve(
     matrix: Matrix,
     *,
     sut_sdk: str | None = None,
+    known_failures: KnownFailures | None = None,
 ) -> list[ResolvedScenario]:
     """Resolve a mixed batch of scenarios. Convenience over :func:`resolve_all`."""
-    return resolve_all(scenarios, matrix, sut_sdk=sut_sdk).scenarios
+    return resolve_all(
+        scenarios, matrix, sut_sdk=sut_sdk, known_failures=known_failures,
+    ).scenarios
 
 
 def resolve_all(
@@ -92,6 +96,7 @@ def resolve_all(
     matrix: Matrix,
     *,
     sut_sdk: str | None = None,
+    known_failures: KnownFailures | None = None,
 ) -> ResolutionReport:
     """Resolve a batch that may mix both schemas.
 
@@ -102,6 +107,9 @@ def resolve_all(
             ``test_when`` and to expand ``include_own_lines``. When omitted
             nothing is filtered and no own-lines peers are added, which is
             what a local peer-only run wants.
+        known_failures: Combinations to leave out. Defaults to the repo's
+            ``known_failures.yaml``; pass an empty :class:`KnownFailures` to
+            resolve everything, which is what the coverage diff wants.
 
     Returns:
         A report with the executable scenarios and the reason for any that
@@ -113,6 +121,9 @@ def resolve_all(
             must fail loudly — the whole point of resolving up front is to
             catch them before CI has built anything.
     """
+    if known_failures is None:
+        known_failures = KnownFailures.from_default()
+
     report = ResolutionReport()
     seen: dict[str, str] = {}
 
@@ -126,7 +137,19 @@ def resolve_all(
             report.skipped.append((scenario.name, skip))
             continue
 
-        report.scenarios.extend(_expand(scenario, matrix, sut_sdk))
+        for resolved in _expand(scenario, matrix, sut_sdk):
+            excluded = known_failures.find(
+                sdks=resolved.sdks,
+                protocols=resolved.protocols,
+                behavior=resolved.behavior,
+                streaming=resolved.streaming,
+            )
+            if excluded is not None:
+                report.skipped.append(
+                    (resolved.name, f'known failure — {excluded.describe()}')
+                )
+                continue
+            report.scenarios.append(resolved)
 
     for s in report.scenarios:
         if s.name in seen:
@@ -237,7 +260,14 @@ def _groups(
     sut = [SUT_ID] if scenario.roles.include_sut else []
 
     if scenario.expand is Expand.TOGETHER:
-        return [(sut + peers, transports, None)]
+        # A peer that can't speak the transport has to leave the graph — the
+        # hop to it would fail and take the whole traversal with it. This is
+        # what a2a-python's and a2a-java's hand-written "Star Topology (No Go
+        # v03) - HTTP_JSON" scenarios encoded by omission; expressing it
+        # through matrix.yaml instead means one declaration covers every
+        # transport and the capability is stated in exactly one place.
+        usable = [p for p in peers if _supports(p, matrix, transports)]
+        return [(sut + usable, transports, None)]
 
     groups = []
     for peer in peers:
@@ -320,6 +350,17 @@ def _intersect(
         # whatever was asked. The SUT's capability isn't the matrix's to know.
         return transports
     return [t for t in transports if t.value in capability]
+
+
+def _supports(
+    agent_id: str, matrix: Matrix, transports: list[Transport]
+) -> bool:
+    """Can this peer speak every requested transport?
+
+    Unknown ids pass: the SUT is not in the matrix, and its capability is not
+    the matrix's to decide.
+    """
+    return len(_intersect(agent_id, matrix, transports)) == len(transports)
 
 
 def _multi_axes(scenario: TraversalScenarioV1) -> set[str]:
