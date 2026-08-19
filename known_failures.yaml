@@ -68,17 +68,3 @@ exclusions:
       but not to python, go, java or rust. JSON-RPC is fine everywhere —
       a2a-java's nightly runs ts_v03 over it green.
     issue: https://github.com/JakubWorek/a2a-java/actions/runs/32203080866
-
-  # ---------------------------------------------------------------------
-  # a2a-java as SUT against python v0.3
-  # ---------------------------------------------------------------------
-  - sut_sdk: [java]
-    agents: [python_v03]
-    reason: >
-      Fails on every transport and behaviour, while go_v03 and ts_v03 pass
-      in the same run — so this is specific to the java <-> python v0.3
-      pairing, not to java's v0.3 support generally. a2a-java's own scenario
-      set never included python_v03, so the shared set is the first thing to
-      exercise it. Deserves a real diagnosis rather than a permanent
-      exclusion.
-    issue: https://github.com/JakubWorek/a2a-java/actions/runs/32203080866
