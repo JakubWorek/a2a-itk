@@ -76,6 +76,10 @@ class ResolutionReport:
 
     scenarios: list[ResolvedScenario] = field(default_factory=list)
     skipped: list[tuple[str, str]] = field(default_factory=list)
+    # Scenarios that still run, but with a peer removed by a known failure.
+    # Reported separately from `skipped`: the scenario is not lost, but it
+    # covers less than the file says, and that must be visible too.
+    trimmed: list[tuple[str, str]] = field(default_factory=list)
 
 
 def resolve(
@@ -137,19 +141,12 @@ def resolve_all(
             report.skipped.append((scenario.name, skip))
             continue
 
-        for resolved in _expand(scenario, matrix, sut_sdk):
-            excluded = known_failures.find(
-                sdks=resolved.sdks,
-                protocols=resolved.protocols,
-                behavior=resolved.behavior,
-                streaming=resolved.streaming,
-            )
-            if excluded is not None:
-                report.skipped.append(
-                    (resolved.name, f'known failure — {excluded.describe()}')
-                )
-                continue
-            report.scenarios.append(resolved)
+        report.scenarios.extend(_expand(
+            scenario, matrix, sut_sdk,
+            known_failures=known_failures,
+            skipped=report.skipped,
+            trimmed=report.trimmed,
+        ))
 
     for s in report.scenarios:
         if s.name in seen:
@@ -200,12 +197,16 @@ def _skip_reason(scenario: TraversalScenarioV1, sut_sdk: str | None) -> str | No
     return None
 
 
-def _expand(
+def _expand(  # noqa: PLR0913
     scenario: TraversalScenarioV1,
     matrix: Matrix,
     sut_sdk: str | None = None,
+    known_failures: KnownFailures | None = None,
+    skipped: list[tuple[str, str]] | None = None,
+    trimmed: list[tuple[str, str]] | None = None,
 ) -> list[ResolvedScenario]:
     """Cartesian product over the plural fields, then over peers if per-peer."""
+    known = known_failures if known_failures is not None else KnownFailures()
     variants = list(itertools.product(
         scenario.behavior_variants(),
         scenario.transport_variants(),
@@ -225,13 +226,33 @@ def _expand(
                     f'a traversal needs at least {_MIN_AGENTS}. '
                     f'Check the peer list against matrix.yaml transports.'
                 )
+
+            name = _name(scenario, behavior, used, streaming, multi, peer_label)
+            kept, dropped = _apply_exclusions(
+                sdks, known, used, behavior, streaming, sut_sdk,
+            )
+            if dropped:
+                why = '; '.join(f'{a} — {e.summary()}' for a, e in dropped)  # type: ignore[union-attr]
+                # An explicit edge list is written against agent positions, so
+                # removing one would silently rewire the graph. Skip instead.
+                if scenario.edges is not None:
+                    _record(skipped, name, f'known failure — {why}')
+                    continue
+                if len(kept) < _MIN_AGENTS:
+                    _record(skipped, name, f'known failure — {why}')
+                    continue
+                # A star keeps its meaning with one arm removed, which is what
+                # the hand-written "No Go v03" scenarios did by omission.
+                _record(trimmed, name, f'dropped {why}')
+                sdks = kept
+
             edges = (
                 scenario.edges
                 if scenario.edges is not None
                 else topology_to_edges(scenario.topology, len(sdks))
             )
             out.append(ResolvedScenario(
-                name=_name(scenario, behavior, used, streaming, multi, peer_label),
+                name=name,
                 sdks=sdks,
                 behavior=behavior.value,
                 edges=edges,
@@ -242,6 +263,43 @@ def _expand(
                 expected=scenario.expected.value,
             ))
     return out
+
+
+def _record(sink: list[tuple[str, str]] | None, name: str, why: str) -> None:
+    if sink is not None:
+        sink.append((name, why))
+
+
+def _apply_exclusions(  # noqa: PLR0913
+    sdks: list[str],
+    known: KnownFailures,
+    transports: list[Transport],
+    behavior: Behavior,
+    streaming: bool,
+    sut_sdk: str | None,
+) -> tuple[list[str], list[tuple[str, object]]]:
+    """Split agents into those that stay and those a known failure removes.
+
+    Evaluated per peer against the SUT, because every rule we have describes
+    a *pair* — "java cannot talk to python_v03", "ts_v03 needs a TypeScript
+    counterpart for grpc". A rule that names no agents at all matches every
+    peer, which empties the scenario and skips it; that is the right
+    behaviour for a rule about a transport or behaviour as a whole.
+    """
+    protocols = [t.value for t in transports]
+    kept: list[str] = []
+    dropped: list[tuple[str, object]] = []
+
+    for agent in sdks:
+        if agent == SUT_ID:
+            kept.append(agent)
+            continue
+        hit = known.find(
+            sdks=[SUT_ID, agent], protocols=protocols,
+            behavior=behavior.value, streaming=streaming, sut_sdk=sut_sdk,
+        )
+        (dropped.append((agent, hit)) if hit else kept.append(agent))
+    return kept, dropped
 
 
 def _groups(

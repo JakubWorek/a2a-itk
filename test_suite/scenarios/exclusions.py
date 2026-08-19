@@ -32,22 +32,33 @@ class ExclusionError(ValueError):
 
 @dataclass(frozen=True)
 class Exclusion:
-    """One rule. Unset fields mean "any"; set fields must all match."""
+    """One rule. Unset fields mean "any"; set fields must all match.
+
+    ``sut_sdk`` and ``unless_sut_sdk`` are here because v0.3 interoperability
+    turns out to be a property of the *pair*, not of a version line on its
+    own. The same ts_v03 peer works over grpc with a TypeScript counterpart
+    and not with a Python one, because the compat layer doing the
+    v0.3<->v1.0 translation lives in whichever SDK drives the hop. A per-line
+    capability in ``matrix.yaml`` cannot express that; these can.
+    """
 
     reason: str
     agents: frozenset[str] = frozenset()
     transports: frozenset[str] = frozenset()
     behaviors: frozenset[str] = frozenset()
+    sut_sdk: frozenset[str] = frozenset()
+    unless_sut_sdk: frozenset[str] = frozenset()
     streaming: bool | None = None
     issue: str | None = None
 
-    def matches(
+    def matches(  # noqa: PLR0911
         self,
         *,
         sdks: list[str],
         protocols: list[str] | None,
         behavior: str,
         streaming: bool,
+        sut_sdk: str | None = None,
     ) -> bool:
         """Does this rule cover the given resolved scenario?"""
         if self.agents and not (self.agents & set(sdks)):
@@ -61,10 +72,19 @@ class Exclusion:
                 return False
         if self.behaviors and behavior not in self.behaviors:
             return False
+        if self.sut_sdk and sut_sdk not in self.sut_sdk:
+            return False
+        if self.unless_sut_sdk and sut_sdk in self.unless_sut_sdk:
+            return False
         return not (self.streaming is not None and streaming != self.streaming)
 
-    def describe(self) -> str:
+    def scope(self) -> str:
+        """The matcher, rendered compactly."""
         bits = []
+        if self.sut_sdk:
+            bits.append(f'sut={"/".join(sorted(self.sut_sdk))}')
+        if self.unless_sut_sdk:
+            bits.append(f'sut!={"/".join(sorted(self.unless_sut_sdk))}')
         if self.agents:
             bits.append('/'.join(sorted(self.agents)))
         if self.transports:
@@ -73,9 +93,23 @@ class Exclusion:
             bits.append('/'.join(sorted(self.behaviors)))
         if self.streaming is not None:
             bits.append('streaming' if self.streaming else 'non-streaming')
-        scope = ' '.join(bits) or 'everything'
+        return ' '.join(bits) or 'everything'
+
+    def summary(self) -> str:
+        """Scope, the first sentence of the reason, and the issue link.
+
+        For per-scenario log lines, where the full rationale would repeat
+        dozens of times and drown out the run. The link stays: it is the one
+        part a reader acts on.
+        """
+        first = ' '.join(self.reason.split()).split('. ')[0].rstrip('.')
+        issue = f' [{self.issue}]' if self.issue else ''
+        return f'{self.scope()}: {first}{issue}'
+
+    def describe(self) -> str:
         issue = f' ({self.issue})' if self.issue else ''
-        return f'{scope}: {self.reason}{issue}'
+        reason = ' '.join(self.reason.split())
+        return f'{self.scope()}: {reason}{issue}'
 
 
 class KnownFailures:
@@ -115,18 +149,26 @@ class KnownFailures:
                     f'nobody can explain is indistinguishable from lost coverage.'
                 )
             unknown = set(entry) - {
-                'reason', 'agents', 'transports', 'behaviors', 'streaming', 'issue',
+                'reason', 'agents', 'transports', 'behaviors', 'streaming',
+                'issue', 'sut_sdk', 'unless_sut_sdk',
             }
             if unknown:
                 raise ExclusionError(
                     f'{where}: exclusions[{i}] has unknown key(s) '
                     f'{sorted(unknown)}'
                 )
+            if entry.get('sut_sdk') and entry.get('unless_sut_sdk'):
+                raise ExclusionError(
+                    f'{where}: exclusions[{i}] sets both `sut_sdk` and '
+                    f'`unless_sut_sdk`; use one or the other'
+                )
             out.append(Exclusion(
                 reason=reason,
                 agents=frozenset(entry.get('agents') or []),
                 transports=frozenset(entry.get('transports') or []),
                 behaviors=frozenset(entry.get('behaviors') or []),
+                sut_sdk=frozenset(entry.get('sut_sdk') or []),
+                unless_sut_sdk=frozenset(entry.get('unless_sut_sdk') or []),
                 streaming=entry.get('streaming'),
                 issue=entry.get('issue'),
             ))
@@ -139,12 +181,13 @@ class KnownFailures:
         protocols: list[str] | None,
         behavior: str,
         streaming: bool,
+        sut_sdk: str | None = None,
     ) -> Exclusion | None:
         """The first rule covering this scenario, if any."""
         for e in self._exclusions:
             if e.matches(
-                sdks=sdks, protocols=protocols,
-                behavior=behavior, streaming=streaming,
+                sdks=sdks, protocols=protocols, behavior=behavior,
+                streaming=streaming, sut_sdk=sut_sdk,
             ):
                 return e
         return None

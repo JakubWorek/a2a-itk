@@ -211,16 +211,28 @@ matched against resolved scenarios:
 
 ```yaml
 exclusions:
-  - agents: [go_v03]
-    behaviors: [push_notification]
-    transports: [grpc]
-    reason: go v0.3 never delivers the second push for a grpc hop.
-    issue: https://github.com/a2aproject/a2a-go/issues/NNN
+  - sut_sdk: [java]
+    agents: [python_v03]
+    reason: java <-> python v0.3 fails on every transport, while go_v03 passes.
+    issue: https://github.com/a2aproject/a2a-java/issues/NNN
 ```
 
 `reason` is required, and every exclusion is logged on every run — an exclusion nobody can see is
-indistinguishable from coverage that quietly disappeared. A capability limit belongs in
-`matrix.yaml` instead, where it also stops the peer being selected in the first place.
+indistinguishable from coverage that quietly disappeared.
+
+**v0.3 interoperability is a property of the pair, not of a version line.** The compat layer that
+translates v0.3 ↔ v1.0 lives in whichever SDK drives the hop, so `ts_v03` works over gRPC against
+a TypeScript counterpart and fails against a Python one. `sut_sdk` and `unless_sut_sdk` are how a
+rule says that. A per-line `transports` in `matrix.yaml` cannot, and would also hide the pairing
+that *does* work — use it only when a line cannot speak a transport from anywhere, which in the
+current corpus is just `go_v03` and http_json.
+
+When an exclusion names `agents`, the peer is **removed from the graph** and the scenario still
+runs: a star keeps its meaning with one arm gone, which is what the hand-written
+"No Go v03 - HTTP_JSON" scenarios did by omission. It is skipped outright only if that would leave
+fewer than two agents, or if it carries an explicit `edges` list that cannot be re-indexed.
+Removals are reported separately from skips, because such a scenario still covers less than the
+file says.
 
 `scripts/scenarios_diff.py` knows about both files: coverage may shrink only where one of them
 explains why, and an unexplained drop fails the check.

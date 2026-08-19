@@ -1,35 +1,84 @@
 # Combinations deliberately left out of every run.
 #
 # Read by :mod:`test_suite.scenarios.exclusions` and applied to resolved
-# scenarios just before they run. Anything excluded is listed in the run
-# output with its reason — an exclusion nobody can see is indistinguishable
-# from silently lost coverage.
+# scenarios just before they run. Anything excluded is logged with its reason
+# on every run — an exclusion nobody can see is indistinguishable from
+# coverage that quietly disappeared.
 #
 # This is for combinations that are BROKEN. A version line that simply does
-# not speak a transport is a different thing: put that in `matrix.yaml` under
-# the line's `transports`, where it also stops the peer being selected in the
-# first place, rather than selecting it and then skipping it here.
+# not speak a transport at all is a different thing: put that in `matrix.yaml`
+# under the line's `transports`, where it also stops the peer being selected
+# in the first place.
 #
-# Because transports are one-per-scenario by default, a rule can name a
-# single transport without taking the others down with it.
+# Nearly everything here is about v0.3 interoperability, and the shape worth
+# understanding is that it is a property of the PAIR, not of a version line.
+# The compat layer translating v0.3 <-> v1.0 lives in whichever SDK drives the
+# hop, so the same ts_v03 peer works over gRPC with a TypeScript counterpart
+# and fails with a Python one. `sut_sdk` / `unless_sut_sdk` express that;
+# a per-line capability cannot.
 #
 # Fields (all optional except `reason`; the ones you set must all match):
-#   agents      any of these agent ids taking part
-#   transports  any of these transports in use
-#   behaviors   one of these behaviours
-#   streaming   true or false
-#   reason      required — why this is excluded
-#   issue       optional link
+#   agents          any of these agent ids taking part
+#   transports      any of these transports in use
+#   behaviors       one of these behaviours
+#   streaming       true or false
+#   sut_sdk         only when the SUT is one of these SDKs
+#   unless_sut_sdk  except when the SUT is one of these SDKs
+#   reason          required — why this is excluded
+#   issue           optional link
 #
-# Worked example:
-#
-#   exclusions:
-#     - agents: [go_v03]
-#       behaviors: [push_notification]
-#       transports: [grpc]
-#       reason: >
-#         go v0.3 never delivers the second push for a grpc hop; the
-#         traversal times out waiting for it.
-#       issue: https://github.com/a2aproject/a2a-go/issues/NNN
+# Every entry below was established by a real run, and names it.
 
-exclusions: []
+exclusions:
+  # ---------------------------------------------------------------------
+  # a2a-rs has no v0.3 client support at all
+  # ---------------------------------------------------------------------
+  - sut_sdk: [rust]
+    agents: [python_v03, go_v03, ts_v03]
+    reason: >
+      a2a-rs cannot parse a v0.3 agent card, so every hop to a v0.3 peer
+      fails at resolution — "failed to parse agent card: error decoding
+      response body for .well-known/agent-card.json". a2a-rs's own scenario
+      set contained no v0.3 peer at all, so nothing covered this before the
+      shared set added it.
+    issue: https://github.com/JakubWorek/a2a-rs/actions/runs/32209906014
+
+  # ---------------------------------------------------------------------
+  # a2a-js as SUT: v0.3 peers over JSON-RPC only, unless the peer is also TS
+  # ---------------------------------------------------------------------
+  - sut_sdk: [ts]
+    agents: [python_v03, go_v03]
+    transports: [grpc, http_json]
+    reason: >
+      The TypeScript v0.3 compat layer handles JSON-RPC against other SDKs
+      but not gRPC or HTTP+JSON. ts_v10 <-> ts_v03 works on all three and is
+      deliberately not covered by this rule. Matches what a2a-js's own
+      scenario set encoded before the migration.
+    issue: https://github.com/JakubWorek/a2a-js/actions/runs/32210009778
+
+  # ---------------------------------------------------------------------
+  # ts_v03 as a peer of anything that isn't TypeScript
+  # ---------------------------------------------------------------------
+  - agents: [ts_v03]
+    transports: [grpc, http_json]
+    unless_sut_sdk: [ts]
+    reason: >
+      The v0.3 compat layer for gRPC and HTTP+JSON is implemented properly
+      only on the TypeScript side, so ts_v03 serves them to a TS counterpart
+      but not to python, go, java or rust. JSON-RPC is fine everywhere —
+      a2a-java's nightly runs ts_v03 over it green.
+    issue: https://github.com/JakubWorek/a2a-java/actions/runs/32203080866
+
+  # ---------------------------------------------------------------------
+  # a2a-java as SUT against python v0.3
+  # ---------------------------------------------------------------------
+  - sut_sdk: [java]
+    agents: [python_v03]
+    reason: >
+      Fails on every transport and behaviour, while go_v03 and ts_v03 pass
+      in the same run — so this is specific to the java <-> python v0.3
+      pairing, not to java's v0.3 support generally. a2a-java's own scenario
+      set never included python_v03, so the shared set is the first thing to
+      exercise it. Deserves a real diagnosis rather than a permanent
+      exclusion.
+    issue: https://github.com/JakubWorek/a2a-java/actions/runs/32203080866

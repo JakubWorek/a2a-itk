@@ -40,7 +40,7 @@ def _scenario(**over):
 def _match(exclusion, **over):
     kwargs = {
         'sdks': ['current', 'go_v10'], 'protocols': ['grpc'],
-        'behavior': 'send_message', 'streaming': False,
+        'behavior': 'send_message', 'streaming': False, 'sut_sdk': 'go',
     }
     kwargs.update(over)
     return exclusion.matches(**kwargs)
@@ -167,3 +167,101 @@ class TestAppliedDuringResolution:
         )
         assert len(split.scenarios) == 1      # jsonrpc survives
         assert len(bundled.scenarios) == 0    # whole bundle goes
+
+
+class TestPairwiseMatching:
+    """v0.3 interop is a property of the (SUT, peer) pair, not of a line.
+
+    The same ts_v03 peer works over grpc against a TypeScript counterpart and
+    fails against a Python one, because the compat layer doing the
+    translation lives in whichever SDK drives the hop. These two fields are
+    what makes that expressible.
+    """
+
+    def test_sut_sdk_narrows_a_rule_to_one_sut(self):
+        e = Exclusion(reason='r', agents=frozenset({'python_v03'}),
+                      sut_sdk=frozenset({'java'}))
+        assert _match(e, sdks=['current', 'python_v03'], sut_sdk='java') is True
+        assert _match(e, sdks=['current', 'python_v03'], sut_sdk='go') is False
+
+    def test_unless_sut_sdk_carves_one_out(self):
+        e = Exclusion(reason='r', agents=frozenset({'ts_v03'}),
+                      transports=frozenset({'grpc'}),
+                      unless_sut_sdk=frozenset({'ts'}))
+        assert _match(e, sdks=['current', 'ts_v03'], sut_sdk='java') is True
+        assert _match(e, sdks=['current', 'ts_v03'], sut_sdk='ts') is False
+
+    def test_an_unknown_sut_still_matches_a_plain_rule(self):
+        """A local run passes no sut_sdk; rules that don't mention one apply."""
+        e = Exclusion(reason='r', agents=frozenset({'go_v10'}))
+        assert _match(e, sut_sdk=None) is True
+
+    def test_sut_scoped_rule_does_not_fire_without_a_sut(self):
+        e = Exclusion(reason='r', agents=frozenset({'go_v10'}),
+                      sut_sdk=frozenset({'java'}))
+        assert _match(e, sut_sdk=None) is False
+
+    def test_both_sut_fields_at_once_is_rejected(self):
+        with pytest.raises(ExclusionError, match='use one or the other'):
+            KnownFailures.from_dict({'exclusions': [
+                {'reason': 'r', 'sut_sdk': ['java'], 'unless_sut_sdk': ['ts']},
+            ]})
+
+
+class TestTrimmingVsSkipping:
+    """A star loses the bad peer; a pair loses the whole scenario."""
+
+    def _star(self, **over):
+        base = {
+            'schema': 'traversal/v1', 'name': 'Star',
+            'roles': {'peers': [
+                {'sdk': 'go', 'line': 'v10'}, {'sdk': 'python', 'line': 'v10'},
+            ]},
+            'transports': ['jsonrpc'], 'behavior': 'send_message',
+        }
+        base.update(over)
+        return parse_tests([base])
+
+    KNOWN = KnownFailures.from_dict({'exclusions': [
+        {'agents': ['go_v10'], 'reason': 'go v1 is broken here'},
+    ]})
+
+    def test_star_keeps_running_without_the_bad_peer(self):
+        """What the hand-written "No Go v03 - HTTP_JSON" scenarios did by
+        omission. Killing the whole star would throw away python_v10 too."""
+        report = resolve_all(self._star(), MATRIX, known_failures=self.KNOWN)
+        [s] = report.scenarios
+        assert s.sdks == ['current', 'python_v10']
+        assert report.skipped == []
+
+    def test_the_trim_is_reported(self):
+        report = resolve_all(self._star(), MATRIX, known_failures=self.KNOWN)
+        assert len(report.trimmed) == 1
+        name, why = report.trimmed[0]
+        assert 'go_v10' in why
+        assert 'go v1 is broken here' in why
+
+    def test_edges_are_rebuilt_for_the_smaller_graph(self):
+        """Edge indices are positional, so a trimmed star must be re-derived
+        or it would wire up the wrong agents."""
+        [s] = resolve_all(self._star(), MATRIX,
+                          known_failures=self.KNOWN).scenarios
+        assert s.edges == ['0->1', '1->0']
+
+    def test_dropping_below_two_agents_skips_the_scenario(self):
+        report = resolve_all(
+            self._star(roles={'peers': [{'sdk': 'go', 'line': 'v10'}]}),
+            MATRIX, known_failures=self.KNOWN,
+        )
+        assert report.scenarios == []
+        assert len(report.skipped) == 1
+
+    def test_explicit_edges_skip_rather_than_trim(self):
+        """A hand-written edge list is indexed against the full agent list;
+        removing one would silently rewire the graph."""
+        report = resolve_all(
+            self._star(edges=['0->1', '0->2', '1->0', '2->0']),
+            MATRIX, known_failures=self.KNOWN,
+        )
+        assert report.scenarios == []
+        assert 'known failure' in report.skipped[0][1]

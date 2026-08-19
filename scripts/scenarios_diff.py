@@ -103,7 +103,9 @@ def load(
     )
 
 
-def explain_drop(a: Atom, matrix: Matrix, known: KnownFailures) -> str | None:
+def explain_drop(
+    a: Atom, matrix: Matrix, known: KnownFailures, sut_sdk: str | None = None
+) -> str | None:
     """Why this hop is legitimately no longer tested, or None if it isn't.
 
     Two acceptable reasons, both written down somewhere a reader can check:
@@ -124,7 +126,7 @@ def explain_drop(a: Atom, matrix: Matrix, known: KnownFailures) -> str | None:
 
     hit = known.find(
         sdks=[caller, callee], protocols=[transport],
-        behavior=behavior, streaming=streaming,
+        behavior=behavior, streaming=streaming, sut_sdk=sut_sdk,
     )
     if hit is not None:
         return f'known_failures.yaml: {hit.describe()}'
@@ -171,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0911
     explained: list[tuple[Atom, str]] = []
     unexplained: list[Atom] = []
     for a in sorted(missing):
-        why = explain_drop(a, matrix, known)
+        why = explain_drop(a, matrix, known, args.sut_sdk)
         (explained.append((a, why)) if why else unexplained.append(a))
 
     if explained:
