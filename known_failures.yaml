@@ -68,3 +68,21 @@ exclusions:
       but not to python, go, java or rust. JSON-RPC is fine everywhere —
       a2a-java's nightly runs ts_v03 over it green.
     issue: https://github.com/JakubWorek/a2a-java/actions/runs/32203080866
+
+  # ---------------------------------------------------------------------
+  # a2a-java's REST inbound path rejects a v0.3 file part
+  # ---------------------------------------------------------------------
+  - sut_sdk: [java]
+    agents: [python_v03]
+    transports: [http_json]
+    reason: >
+      On the return hop python v0.3 POSTs a REST file part carrying `name`,
+      which is a legitimate v0.3 FilePart field. java's compat-0.3
+      RestHandler_v0_3.parseRequestBody parses the body with protobuf
+      JsonFormat against a2a.v1.FilePart, which has no such field, and the
+      parser is strict — InvalidProtocolBufferException "Cannot find field:
+      name in message a2a.v1.FilePart". Inbound REST only: jsonrpc and grpc
+      pass against the same peer. This is the one combination that exposes
+      it, because go_v03 has no http_json at all and ts_v03 over http_json is
+      already excluded for non-TS SUTs.
+    issue: https://github.com/JakubWorek/a2a-java/actions/runs/32234766416
