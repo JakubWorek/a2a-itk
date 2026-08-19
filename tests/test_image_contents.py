@@ -1,10 +1,8 @@
 """What the shared runner invokes must actually be in the image.
 
-``.dockerignore`` excludes ``scripts/`` because everything in it runs on the
-host. A helper placed there but invoked with ``docker exec`` is therefore
-missing at run time — and the failure surfaces two steps later as a FastAPI
-422 about a missing request field, which points nowhere near the cause. That
-happened once; this pins it shut.
+A helper under a ``.dockerignore``-excluded path but invoked with
+``docker exec`` is missing at run time, and surfaces two steps later as a
+FastAPI 422 about a missing request field. That happened once.
 
 Pure text inspection: no Docker needed, so it runs in CI.
 """

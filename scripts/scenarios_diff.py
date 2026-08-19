@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check the shared scenario set still covers each SDK's legacy set.
 
-Story 2.3's acceptance condition is that migrating a repo onto the shared
+The acceptance condition is that migrating a repo onto the shared
 scenarios doesn't quietly test less than its own file did. Comparing the two
 files scenario-by-scenario doesn't answer that, because the merge deliberately
 reshapes them: five repos wrote the same test five different ways, several
@@ -48,10 +48,9 @@ from pathlib import Path
 
 from test_suite.launcher.matrix import Matrix, MatrixError
 from test_suite.scenarios.exclusions import KnownFailures
+from test_suite.transports import TRANSPORT_ORDER
 from test_suite.scenarios.loader import ScenarioFileError, load_file
 from test_suite.scenarios.resolver import ResolutionError, ResolvedScenario, resolve
-
-_ALL_TRANSPORTS = ('jsonrpc', 'grpc', 'http_json')
 
 # (caller, callee, transport, behavior, streaming)
 Atom = tuple[str, str, str, str, bool]
@@ -60,7 +59,7 @@ Atom = tuple[str, str, str, str, bool]
 def atoms(s: ResolvedScenario) -> set[Atom]:
     """Every hop this scenario exercises, once per transport."""
     pairs = _edge_pairs(s)
-    transports = s.protocols or list(_ALL_TRANSPORTS)
+    transports = s.protocols or list(TRANSPORT_ORDER)
     return {
         (caller, callee, t, s.behavior, bool(s.streaming))
         for caller, callee in pairs

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -27,8 +28,12 @@ from test_suite.agent_table import AgentTable
 from test_suite.launcher import Cluster, TargetSpec
 from test_suite.launcher.fetch import resolve_ref
 from test_suite.launcher.matrix import Matrix
-from test_suite.scenarios.loader import parse_tests
-from test_suite.scenarios.resolver import ResolvedScenario, resolve_all
+from test_suite.scenarios.loader import load_file, parse_tests
+from test_suite.scenarios.resolver import (
+    ResolutionReport,
+    ResolvedScenario,
+    resolve_all,
+)
 from test_suite.launcher.spec import Kind
 from testlib import execute_itk_test
 
@@ -46,11 +51,8 @@ SUT_ID = 'current'
 # ---------------------------------------------------------------------------
 
 
-# One scenario to execute, with roles already bound to concrete agents.
-# Field-for-field the schema of an entry in an SDK's ``scenarios.json``, so a
-# legacy file runs unchanged; a traversal/v1 scenario becomes one of these
-# (or several) via the resolver first. Everything below this point sees only
-# this shape and never learns which schema it came from.
+# Everything below this point sees only this shape, never which schema it
+# came from.
 Scenario = ResolvedScenario
 
 
@@ -58,12 +60,9 @@ Scenario = ResolvedScenario
 class ScenarioResult:
     """One scenario's outcome, plus enough of its definition to record it.
 
-    The extra fields exist because the nightly metrics processor used to
-    recover them by matching the result name back against the scenario file
-    — and silently dropped any scenario whose name it couldn't find. That
-    made renaming a scenario, or generating one, quietly erase it from the
-    published history. Carrying the metadata with the result removes the
-    lookup, and the failure mode with it.
+    The metadata rides along so the nightly metrics processor needn't recover
+    it by matching the result name back to a scenario file — a lookup that
+    silently dropped anything it couldn't match.
     """
 
     passed: bool
@@ -103,14 +102,9 @@ class _Plan:
 # Serialisation of runs
 # ---------------------------------------------------------------------------
 
-# A run owns a whole cluster: host ports, the launcher's build cache, and
-# the fixed container port the notification server binds. Two runs at once in
-# one process would contend on all three, so they're serialised. Both front
-# ends go through here, so one lock covers both.
-#
-# (Until Story 2.2 this also guarded the process-global agent registry.
-# That's gone — ports now travel as an AgentTable argument — but the
-# resource contention above is reason enough to keep the lock.)
+# A run owns a whole cluster: host ports, the launcher's build cache, and the
+# fixed container port the notification server binds. Two at once would
+# contend on all three.
 _execution_lock = asyncio.Lock()
 
 _matrix: Matrix | None = None
@@ -141,40 +135,64 @@ def set_matrix(matrix: Matrix | None) -> None:
 
 
 def prepare(raw_tests: object, *, sut_sdk: str | None = None) -> list[Scenario]:
-    """Parse and resolve whatever the caller supplied into runnable scenarios.
+    """Resolve an already-parsed scenario document into runnable scenarios.
 
     Accepts a ``{"tests": [...]}`` mapping or a bare list, holding legacy
-    entries, ``traversal/v1`` entries, or a mixture. Both front ends funnel
-    through here so a scenario behaves the same over HTTP and on the CLI, and
-    so an SDK can migrate one scenario at a time.
+    entries, ``traversal/v1`` entries, or a mixture.
 
     Args:
         raw_tests: The parsed scenario document.
-        sut_sdk: Which SDK is under test, for evaluating ``test_when``. When
-            omitted nothing is filtered.
-
-    Returns:
-        Executable scenarios, roles already bound to concrete agents.
+        sut_sdk: SDK under test, for ``test_when`` and ``include_own_lines``.
 
     Raises:
         test_suite.scenarios.loader.ScenarioFileError: Malformed input.
         test_suite.scenarios.resolver.ResolutionError: A scenario names a
             peer the matrix doesn't have, or can't be bound.
     """
-    report = resolve_all(parse_tests(raw_tests), get_matrix(), sut_sdk=sut_sdk)
-    # Both lists are logged at warning, item by item. A skip or a trim that
-    # scrolls past unnoticed is indistinguishable from coverage that quietly
-    # vanished, which is the failure mode this work exists to remove.
+    return _report(
+        resolve_all(parse_tests(raw_tests), get_matrix(), sut_sdk=sut_sdk)
+    )
+
+
+def prepare_file(path: Path, *, sut_sdk: str | None = None) -> list[Scenario]:
+    """Same as :func:`prepare`, reading the document from a file.
+
+    Both front ends go through one of these two so a scenario behaves the
+    same over HTTP and on the CLI — including what gets reported about the
+    scenarios that won't run.
+    """
+    return _report(
+        resolve_all(load_file(path), get_matrix(), sut_sdk=sut_sdk)
+    )
+
+
+def _report(report: ResolutionReport) -> list[Scenario]:
+    """Log what won't run, and what will run short-handed.
+
+    At warning level, because a skip or a trim nobody notices is
+    indistinguishable from coverage that quietly vanished. Grouped by cause:
+    one exclusion typically hits dozens of scenarios, and repeating its
+    rationale per scenario buries the run's actual output.
+    """
     if report.skipped:
+        by_reason: dict[str, int] = defaultdict(int)
+        for _, why in report.skipped:
+            by_reason[why] += 1
         logger.warning('%d scenario(s) SKIPPED:', len(report.skipped))
-        for name, why in report.skipped:
-            logger.warning('  %s — %s', name, why)
+        for why, n in sorted(by_reason.items()):
+            logger.warning('  [%d] %s', n, why)
+
     if report.trimmed:
+        by_peer: dict[tuple[str, str], int] = defaultdict(int)
+        for _, agent, why in report.trimmed:
+            by_peer[(agent, why)] += 1
         logger.warning(
-            '%d scenario(s) RUNNING WITH A PEER REMOVED:', len(report.trimmed),
+            '%d scenario(s) running with a peer removed:',
+            len({name for name, _, _ in report.trimmed}),
         )
-        for name, why in report.trimmed:
-            logger.warning('  %s — %s', name, why)
+        for (agent, why), n in sorted(by_peer.items()):
+            logger.warning('  [%d] %s dropped — %s', n, agent, why)
+
     logger.info('%d scenario(s) to run', len(report.scenarios))
     return report.scenarios
 

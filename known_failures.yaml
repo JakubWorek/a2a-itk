@@ -1,31 +1,21 @@
 # Combinations deliberately left out of every run.
 #
-# Read by :mod:`test_suite.scenarios.exclusions` and applied to resolved
-# scenarios just before they run. Anything excluded is logged with its reason
-# on every run — an exclusion nobody can see is indistinguishable from
-# coverage that quietly disappeared.
+# Applied to resolved scenarios just before they run; each is logged with its
+# reason, because an exclusion nobody can see is indistinguishable from
+# coverage that quietly disappeared. Where an exclusion names `agents`, that
+# peer is removed from the graph and the scenario still runs; it is skipped
+# only if fewer than two agents remain.
 #
-# This is for combinations that are BROKEN. A version line that simply does
-# not speak a transport at all is a different thing: put that in `matrix.yaml`
-# under the line's `transports`, where it also stops the peer being selected
-# in the first place.
+# This file is for combinations that are BROKEN. A line that cannot speak a
+# transport from anywhere belongs in matrix.yaml's per-line `transports`,
+# which also stops the peer being selected at all. Most entries here are v0.3
+# interop, where the compat layer lives in whichever SDK drives the hop — so
+# the limit is a property of the (SUT, peer) pair, which `sut_sdk` and
+# `unless_sut_sdk` express and a per-line capability cannot.
 #
-# Nearly everything here is about v0.3 interoperability, and the shape worth
-# understanding is that it is a property of the PAIR, not of a version line.
-# The compat layer translating v0.3 <-> v1.0 lives in whichever SDK drives the
-# hop, so the same ts_v03 peer works over gRPC with a TypeScript counterpart
-# and fails with a Python one. `sut_sdk` / `unless_sut_sdk` express that;
-# a per-line capability cannot.
-#
-# Fields (all optional except `reason`; the ones you set must all match):
-#   agents          any of these agent ids taking part
-#   transports      any of these transports in use
-#   behaviors       one of these behaviours
-#   streaming       true or false
-#   sut_sdk         only when the SUT is one of these SDKs
-#   unless_sut_sdk  except when the SUT is one of these SDKs
-#   reason          required — why this is excluded
-#   issue           optional link
+# Fields (all optional except `reason`; those set must all match):
+#   agents  transports  behaviors  streaming  sut_sdk  unless_sut_sdk
+#   reason (required)   issue
 #
 # Every entry below was established by a real run, and names it.
 

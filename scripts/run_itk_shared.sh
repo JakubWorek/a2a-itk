@@ -1,51 +1,18 @@
 #!/bin/bash
 # Shared ITK driver, sourced by each SDK's itk/run_itk.sh.
 #
-# The five per-SDK scripts were ~70% identical (clone a2a-itk, build and run
-# the container, poll readiness, POST /run, summarise or hand off to the
-# metrics processor) and had drifted apart in the remaining 30% — three
-# different result summarisers, only one response validator, inconsistent
-# git safe.directory handling. This file is the union of the correct
-# behaviours; each SDK keeps only what is genuinely language-specific.
+# The five per-SDK scripts were ~70% identical and had drifted in the rest —
+# three different result summarisers, only one response validator,
+# inconsistent git safe.directory handling. This is the union of the correct
+# behaviours; each SDK keeps only what is language-specific.
 #
-# Usage: the caller clones a2a-itk (it cannot source this file otherwise),
-# sets the configuration below, optionally defines the hook functions, then
-# sources this script as its last statement. See scripts/README.md for a
-# copy-pasteable shim per SDK.
+# The caller clones a2a-itk (it cannot source this file otherwise), sets the
+# configuration, optionally defines the hooks, then sources this as its last
+# statement.
 #
-# Configuration (set before sourcing):
-#   ITK_SDK_NAME        required. 'python' | 'go' | 'js' | 'java' | 'rust'.
-#   ITK_SDK_REPO        GitHub repo name. Default 'a2a-$ITK_SDK_NAME'
-#                       (rust must override: its repo is 'a2a-rs').
-#   ITK_METRICS_NAME    Nightly history basename -> itk_<name>.json.
-#                       Default '$ITK_SDK_NAME'.
-#   ITK_MATRIX_SDK      This SDK's key in matrix.yaml. Default '$ITK_SDK_NAME'
-#                       (a2a-js must override: it is 'ts' there).
-#   ITK_COPY_PROTO      Copy protos/instruction.proto into the itk dir before
-#                       codegen. Default 1. Java and Rust set 0 — their builds
-#                       read it out of the a2a-itk checkout directly.
-#   ITK_MOUNT_ITK_DIR   Bind-mount the itk dir over /app/agents/repo/itk.
-#                       Default 1. Java sets 0.
-#   ITK_REMOVE_IMAGE    Delete the itk_service image on exit. Default 0, so
-#                       local re-runs reuse layer cache. CI runners are
-#                       ephemeral, so leaving it costs nothing there.
-#   ITK_EXTRA_DOCKER_ARGS  Bash array of extra `docker run` arguments. Go uses
-#                       it for GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn.
-#   ITK_SCENARIO_SET    'local' (default) reads the SDK's own scenarios.json /
-#                       scenarios_full.json. 'shared' reads the role-based
-#                       sets from the a2a-itk checkout instead, so the SDK
-#                       needs no scenario file of its own.
-#   SCENARIO_FILE       An explicit scenario file, overriding both of the
-#                       above. JSON or YAML, either schema.
-#
-# Hooks (optional; define as shell functions before sourcing):
-#   itk_generate_protos  Language-specific codegen, run from the itk dir after
-#                        the proto copy and before the image build.
-#   itk_extra_cleanup    Extra paths to remove on exit, run from the itk dir.
-#
-# Environment already honoured by CI and unchanged here: A2A_ITK_REVISION,
-# ITK_ENTRYPOINT, ITK_LOG_LEVEL, ITK_NIGHTLY_RUN, ITK_SKIP_BUILD,
-# ITK_READINESS_TIMEOUT, ITK_MAX_WORKERS.
+# Configuration, hooks and a copy-pasteable shim per SDK are documented in
+# scripts/README.md. Keep that table the single source; do not restate it
+# here.
 
 set -ex
 
@@ -214,9 +181,8 @@ echo "ITK Service is up! Sending compatibility test request using $SCENARIO_FILE
 # service which SDK is under test, so scenarios gated on `test_when` and the
 # `include_own_lines` peers resolve for the right one — without it a shared
 # set would quietly run a different mix of peers.
-#
-# The module lives under test_suite/ rather than scripts/ because
-# .dockerignore excludes scripts/ — everything else in it runs on the host.
+# (Under test_suite/, not scripts/ — .dockerignore keeps scripts/ out of the
+# image.)
 $CONTAINER_RT exec -i -w /app itk-service \
   uv run python -m test_suite.scenarios.build_request \
     --scenarios - --sut-sdk "$ITK_MATRIX_SDK" --output - \

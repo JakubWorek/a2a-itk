@@ -34,12 +34,9 @@ sdks:
     v03: {repo: a2aproject/a2a-go, ref: "v0.3.15+itk", transports: [jsonrpc, grpc]}
   ts:
     v10: {repo: a2aproject/a2a-js, ref: main}
-    # All three — but grpc and http_json only hold up against a TypeScript
-    # counterpart, because the v0.3 compat layer that translates them is
-    # properly implemented on the TS side only. That is a property of the
-    # pair, not of this line, so it lives in known_failures.yaml. Recording
-    # it here instead would also hide the ts_v10 <-> ts_v03 combination that
-    # does work.
+    # All three. grpc and http_json only work against a TypeScript
+    # counterpart, but that is a property of the pair — see
+    # known_failures.yaml.
     v03: {repo: a2aproject/a2a-js, ref: "v0.3.14+itk"}
   java:
     v10: {repo: a2aproject/a2a-java, ref: main}

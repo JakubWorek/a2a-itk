@@ -211,6 +211,12 @@ def main() -> None:
     base_scenarios = load_scenarios(scenarios_file, required=not self_describing)
     by_name = {b['name']: b for b in base_scenarios if 'name' in b}
 
+    if not results:
+        # Belt and braces alongside itk_report.validate: publishing a run with
+        # no scenarios can push a real entry off the rolling window.
+        logger.error('No results to record; refusing to publish an empty run.')
+        raise SystemExit(1)
+
     compiled_scenarios = []
     dropped = []
     for name, details in results.items():

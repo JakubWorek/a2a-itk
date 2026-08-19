@@ -79,7 +79,10 @@ class ResolutionReport:
     # Scenarios that still run, but with a peer removed by a known failure.
     # Reported separately from `skipped`: the scenario is not lost, but it
     # covers less than the file says, and that must be visible too.
-    trimmed: list[tuple[str, str]] = field(default_factory=list)
+    # (scenario name, agent removed, why). One entry per removed agent, not
+    # per scenario, so callers can group by cause instead of printing the
+    # same rationale once per scenario.
+    trimmed: list[tuple[str, str, str]] = field(default_factory=list)
 
 
 def resolve(
@@ -203,7 +206,7 @@ def _expand(  # noqa: PLR0913
     sut_sdk: str | None = None,
     known_failures: KnownFailures | None = None,
     skipped: list[tuple[str, str]] | None = None,
-    trimmed: list[tuple[str, str]] | None = None,
+    trimmed: list[tuple[str, str, str]] | None = None,
 ) -> list[ResolvedScenario]:
     """Cartesian product over the plural fields, then over peers if per-peer."""
     known = known_failures if known_failures is not None else KnownFailures()
@@ -232,18 +235,20 @@ def _expand(  # noqa: PLR0913
                 sdks, known, used, behavior, streaming, sut_sdk,
             )
             if dropped:
-                why = '; '.join(f'{a} — {e.summary()}' for a, e in dropped)  # type: ignore[union-attr]
-                # An explicit edge list is written against agent positions, so
-                # removing one would silently rewire the graph. Skip instead.
-                if scenario.edges is not None:
-                    _record(skipped, name, f'known failure — {why}')
+                # An explicit edge list is indexed by agent position, so
+                # removing one would silently rewire the graph.
+                unrunnable = scenario.edges is not None or len(kept) < _MIN_AGENTS
+                if unrunnable:
+                    why = '; '.join(
+                        f'{a} — {e.summary()}' for a, e in dropped  # type: ignore[union-attr]
+                    )
+                    if skipped is not None:
+                        skipped.append((name, f'known failure — {why}'))
                     continue
-                if len(kept) < _MIN_AGENTS:
-                    _record(skipped, name, f'known failure — {why}')
-                    continue
-                # A star keeps its meaning with one arm removed, which is what
-                # the hand-written "No Go v03" scenarios did by omission.
-                _record(trimmed, name, f'dropped {why}')
+                if trimmed is not None:
+                    trimmed.extend(
+                        (name, a, e.summary()) for a, e in dropped  # type: ignore[union-attr]
+                    )
                 sdks = kept
 
             edges = (
@@ -265,11 +270,6 @@ def _expand(  # noqa: PLR0913
     return out
 
 
-def _record(sink: list[tuple[str, str]] | None, name: str, why: str) -> None:
-    if sink is not None:
-        sink.append((name, why))
-
-
 def _apply_exclusions(  # noqa: PLR0913
     sdks: list[str],
     known: KnownFailures,
@@ -280,11 +280,16 @@ def _apply_exclusions(  # noqa: PLR0913
 ) -> tuple[list[str], list[tuple[str, object]]]:
     """Split agents into those that stay and those a known failure removes.
 
-    Evaluated per peer against the SUT, because every rule we have describes
-    a *pair* — "java cannot talk to python_v03", "ts_v03 needs a TypeScript
-    counterpart for grpc". A rule that names no agents at all matches every
-    peer, which empties the scenario and skips it; that is the right
-    behaviour for a rule about a transport or behaviour as a whole.
+    Evaluated per peer against the SUT, because every rule describes a
+    *pair* — "java cannot talk to python_v03", "ts_v03 needs a TypeScript
+    counterpart for grpc". A rule naming no agents matches every peer, which
+    empties the scenario and skips it; that is right for a rule about a
+    transport or behaviour as a whole.
+
+    Assumes the pair is (SUT, peer). In a peer-only scenario
+    (``include_sut: false``) ``current`` is not in the graph, so a rule about
+    two specific peers cannot be expressed, and one naming ``current`` would
+    match every peer. No shipped rule does either.
     """
     protocols = [t.value for t in transports]
     kept: list[str] = []

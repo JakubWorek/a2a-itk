@@ -7,10 +7,10 @@ format; one without it is the legacy shape every SDK's ``scenarios.json``
 uses today. Both end up as :class:`itk_runner.Scenario` before execution, so
 nothing downstream knows the difference.
 
-``schema:`` is a string rather than a bare version number because Phase 4
-adds a second, unrelated kind of scenario (ACTS conformance, which drives raw
-HTTP rather than an agent traversal). ``schema: acts/v1`` slots in beside
-``traversal/v1`` without either having to know about the other.
+``schema:`` is a string rather than a bare version number so an unrelated
+kind of scenario — ACTS conformance, which drives raw HTTP rather than an
+agent traversal — can slot in as ``schema: acts/v1`` without either having to
+know about the other.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from test_suite.scenarios.topology import Topology
+from test_suite.transports import Transport
 
 
 PEER_PLACEHOLDER = '{peer}'
@@ -63,34 +64,17 @@ class Behavior(str, enum.Enum):
 class Expand(str, enum.Enum):
     """How a multi-peer role list becomes scenarios.
 
-    The two shapes the shipping corpus is built from, and they need different
-    treatment when a peer can't speak a requested transport:
-
     ``TOGETHER``
-        One scenario containing every peer. A peer that cannot speak *all* the
-        requested transports is left out of the graph entirely — the hop to it
-        would fail. This is what a2a-python's and a2a-java's hand-written
-        "Star Topology (No Go v03) - HTTP_JSON" scenarios do by omission.
+        One scenario holding every peer. A peer that cannot speak the
+        transport leaves the graph — the hop to it would fail.
 
     ``PER_PEER``
-        One scenario per peer, each SUT-plus-one. Here a peer that speaks only
-        some of the requested transports is still worth running over the ones
-        it does speak, so the transport list is intersected with its
-        capability rather than the peer being dropped. That is how the nightly
-        sets end up running go_v03 over jsonrpc+grpc while running python_v10
-        over all three, in the same family of scenarios.
+        One SUT-plus-one scenario per peer, so a partially-capable peer
+        simply gets fewer scenarios instead of being dropped.
     """
 
     TOGETHER = 'together'
     PER_PEER = 'per_peer'
-
-
-class Transport(str, enum.Enum):
-    """Wire protocol for a hop."""
-
-    JSONRPC = 'jsonrpc'
-    GRPC = 'grpc'
-    HTTP_JSON = 'http_json'
 
 
 class PeerRef(BaseModel):
@@ -137,13 +121,9 @@ class Roles(BaseModel):
     )
     include_own_lines: bool = Field(
         default=False,
-        description="Also test the SUT against its own SDK's released lines. "
-                    'Every repo does this by hand today — a2a-java lists '
-                    'java_v10 as a peer, a2a-js lists ts_v03 — because "does '
-                    'my change still work against my own last release?" is a '
-                    'different question from cross-SDK compatibility. Needs '
-                    'sut_sdk; without one it adds nothing, which is what a '
-                    'local peer-only run wants.',
+        description="Also test the SUT against its own SDK's released lines "
+                    '— a different question from cross-SDK compatibility. '
+                    'Needs sut_sdk; without one it adds nothing.',
     )
 
 
@@ -171,7 +151,7 @@ class TraversalScenarioV1(BaseModel):
     executable scenarios. They exist because the nightly sets are already a
     hand-written product — 32 near-identical entries per SDK — and writing
     that out by hand is how the five repos drifted apart in the first place.
-    Phase 3 builds on the same mechanism rather than adding another.
+    Generated matrices build on the same mechanism rather than adding one.
     """
 
     model_config = ConfigDict(extra='forbid')
@@ -285,7 +265,7 @@ class LegacyScenario(BaseModel):
     """The shape every SDK's ``scenarios.json`` uses today.
 
     Frozen: these files live in five repos we don't all own, and they keep
-    working unchanged until Story 2.5 migrates each one.
+    working unchanged until each one is migrated.
     """
 
     model_config = ConfigDict(extra='ignore')

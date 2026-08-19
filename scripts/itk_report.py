@@ -56,6 +56,12 @@ def validate(data: Any) -> dict[str, Any]:
         raise InvalidResponse(
             f'"results" is not an object (got {type(data["results"]).__name__})'
         )
+    if not data['results']:
+        # A run that executed nothing is not a pass. Rejected here rather than
+        # downstream, because process_results.py would append a run with zero
+        # scenarios and — at the history limit — push a real entry off the end
+        # of the rolling window.
+        raise InvalidResponse('"results" is empty; nothing ran')
     return data
 
 

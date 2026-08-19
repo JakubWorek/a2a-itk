@@ -3,9 +3,7 @@ import itertools
 from pyproto import instruction_pb2
 
 from test_suite.agent_table import AgentTable
-
-
-_ALL_TRANSPORTS = {'jsonrpc', 'grpc', 'http_json'}
+from test_suite.transports import ALL_TRANSPORTS as _ALL_TRANSPORTS
 
 _END_OF_TRAVERSAL_TOKEN = 'traversal-completed'  # noqa: S105
 

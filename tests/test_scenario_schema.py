@@ -38,7 +38,7 @@ class TestDiscriminator:
         assert is_traversal_v1({'name': 'x', 'sdks': []}) is False
 
     def test_a_future_schema_is_not_traversal_v1(self):
-        """Phase 4's ACTS scenarios ride the same envelope; they must not be
+        """A future schema rides the same envelope; it must not be
         mistaken for traversal scenarios."""
         assert is_traversal_v1({'schema': 'acts/v1'}) is False
 

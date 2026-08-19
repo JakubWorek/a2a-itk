@@ -1,16 +1,9 @@
 """Named traversal topologies, and their expansion to edge lists.
 
-Scenarios used to hand-write ``edges: ["0->1", "0->2", "1->0", "2->0"]``.
-Every scenario shipping across the five SDKs turned out to use one of three
-shapes, so they are named here instead: authors pick a topology and the edge
-list follows from the agent count.
+Authors pick a topology and the edge list follows from the agent count.
+Index 0 is always the SUT; peers follow in scenario order.
 
-Index 0 is always the SUT; peers follow in the order the scenario lists them.
-
-An explicit ``edges:`` on a scenario still wins — the escape hatch exists for
-graphs none of these names describe (disconnected components, deliberately
-unbalanced graphs), which the traversal engine supports and Phase 4 will
-likely need.
+An explicit ``edges:`` still wins, for graphs none of these names describe.
 """
 
 from __future__ import annotations

@@ -1,17 +1,12 @@
 """ITK service — the HTTP ``/run`` handler.
 
-The wire contract is backwards compatible: ``/health``, port 8000, and the
-legacy request/response schema every SDK's ``run_itk.sh`` POSTs its
-``scenarios.json`` against all behave exactly as before. What is new is that
-``/run`` also accepts ``traversal/v1`` scenarios, and may be sent a batch
-mixing both — which is what lets each SDK migrate on its own schedule
-instead of all five having to cut over at once.
+``/health``, port 8000 and the legacy request/response schema are unchanged.
+``/run`` additionally accepts ``traversal/v1`` scenarios, and a batch may mix
+both, so each SDK can migrate on its own schedule.
 
-This module is deliberately thin. All the actual work — parsing scenarios,
-binding roles against ``matrix.yaml``, starting the cluster, executing —
-lives in :mod:`itk_runner`, which ``run_tests.py`` also drives. Everything
-here is HTTP concerns: request shape and mapping runner errors onto status
-codes.
+Thin by design: parsing, role binding, cluster lifecycle and execution all
+live in :mod:`itk_runner`, which ``run_tests.py`` also drives. Everything
+here is HTTP concerns.
 """
 
 from __future__ import annotations
@@ -38,38 +33,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Wire schema
-#
-# The request is deliberately untyped here. Two scenario schemas are live at
-# once — the legacy shape every SDK's scenarios.json still uses, and
-# traversal/v1 — and each SDK migrates on its own schedule, so the endpoint
-# has to take either. Validation happens in test_suite.scenarios, which owns
-# both schemas; duplicating one of them as a pydantic model here would just
-# give the two definitions somewhere to drift apart.
-#
-# The response is typed, and its existing fields are unchanged.
-# ---------------------------------------------------------------------------
-
-
 class RunTestsRequest(BaseModel):
+    # Untyped on purpose: both scenario schemas are live, and
+    # test_suite.scenarios owns their validation. A pydantic copy here would
+    # only give the definitions somewhere to drift apart.
     tests: list[dict[str, Any]]
-    # Which SDK is under test. Only used to evaluate a scenario's `test_when`,
-    # so a shared scenario set can carry entries that don't apply to every
-    # SUT. Absent means nothing is filtered, which is what every SDK sending
-    # its own scenarios.json today wants.
+    # SDK under test, for `test_when` and `include_own_lines`. Absent means
+    # nothing is filtered, which is what a legacy scenarios.json wants.
     sut_sdk: str | None = None
 
 
 class TestResultDetails(BaseModel):
     """One scenario's outcome.
 
-    ``passed``/``sdks``/``edges`` are the original three and are unchanged.
-    The rest were added so the nightly metrics processor no longer has to
-    recover a scenario's definition by matching its name back against the
-    scenario file — a lookup that silently dropped anything it couldn't
-    match. Optional, so an older consumer reading only the first three is
-    unaffected.
+    ``passed``/``sdks``/``edges`` are unchanged. The rest are optional
+    additions, so a consumer reading only those three is unaffected.
     """
 
     passed: bool
@@ -122,14 +100,16 @@ async def run_tests(request: RunTestsRequest) -> RunTestsResponse:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     if not scenarios:
-        # Every scenario was filtered out by test_when. Refused rather than
-        # returning an empty pass, which would read as a green run that
-        # tested nothing.
+        # Refused rather than returning an empty pass, which would read as a
+        # green run that tested nothing. The cause is in the service log:
+        # itk_runner reports every skip with its reason.
         raise HTTPException(
             status_code=400,
             detail=(
-                f'No scenarios apply to sut_sdk={request.sut_sdk!r}; '
-                f'all {len(request.tests)} were filtered out by test_when'
+                f'All {len(request.tests)} scenario declaration(s) resolved to '
+                f'nothing runnable for sut_sdk={request.sut_sdk!r} — filtered '
+                f'by test_when, or excluded as known failures. See the service '
+                f'log for the per-scenario reasons.'
             ),
         )
 

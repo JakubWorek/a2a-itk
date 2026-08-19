@@ -1,21 +1,11 @@
 """Known failures: combinations deliberately left out of a run.
 
-Generated scenarios can't carry an ``expected: fail`` marker — with
-``peers: all`` the scenario doesn't exist in any file to annotate. So the
-exceptions live in one central list instead, matched against resolved
-scenarios just before they run.
+Generated scenarios can't carry an inline ``expected: fail`` marker — with
+``peers: all`` there is no entry in a file to annotate — so exceptions live
+in one list, matched against resolved scenarios just before they run.
 
-This is for things that are genuinely broken or unsupported and would
-otherwise be red on every run. It is deliberately *not* the place for a
-capability limit: if a version line simply doesn't speak a transport, that
-belongs in ``matrix.yaml``'s per-line ``transports``, where it also stops the
-peer being selected in the first place. Use this when the combination is a
-defect rather than a shape.
-
-Every entry needs a ``reason``. An exclusion nobody can explain is
-indistinguishable from silently dropped coverage, which is the failure mode
-this whole consolidation exists to remove — so exclusions are reported on
-every run rather than applied quietly.
+See ``known_failures.yaml`` for when to use this rather than ``matrix.yaml``,
+and for the field reference.
 """
 
 from __future__ import annotations
@@ -34,12 +24,8 @@ class ExclusionError(ValueError):
 class Exclusion:
     """One rule. Unset fields mean "any"; set fields must all match.
 
-    ``sut_sdk`` and ``unless_sut_sdk`` are here because v0.3 interoperability
-    turns out to be a property of the *pair*, not of a version line on its
-    own. The same ts_v03 peer works over grpc with a TypeScript counterpart
-    and not with a Python one, because the compat layer doing the
-    v0.3<->v1.0 translation lives in whichever SDK drives the hop. A per-line
-    capability in ``matrix.yaml`` cannot express that; these can.
+    ``sut_sdk`` / ``unless_sut_sdk`` exist so a rule can name a (SUT, peer)
+    pair, which a per-line capability in ``matrix.yaml`` cannot express.
     """
 
     reason: str

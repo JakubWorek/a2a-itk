@@ -1,15 +1,8 @@
 """Where each agent in the current run is listening.
 
-Replaces the module-level ``_AGENT_DEFS`` registry this package used to
-carry. That registry served two purposes and did neither well: it enumerated
-the legal agent identifiers (a second source of truth beside ``matrix.yaml``,
-which drifted from it), and it held ports the launcher had allocated (global
-mutable state, poked before a run and cleared after, so two runs in one
-process raced and a leaked entry silently changed the next run's target).
-
-Both jobs now belong elsewhere. ``matrix.yaml`` alone says which agents
-exist; this table says where the ones started *for this run* are, and it is
-passed down the call chain rather than reached for.
+``matrix.yaml`` says which agents exist; this says where the ones started for
+*this run* are. Passed down the call chain rather than held in a module
+global, so one run cannot leak ports into the next.
 """
 
 from __future__ import annotations

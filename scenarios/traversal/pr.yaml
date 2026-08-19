@@ -1,28 +1,16 @@
-# PR tier: a star of the SUT against a small, fixed peer set.
+# PR tier: a star of the SUT against a small, fixed peer set — the common
+# core of what the five repos each used to list, python and go on both lines.
 #
-# Replaces the per-repo `scenarios.json`. Those had drifted into five
-# different peer sets — a2a-python and a2a-go used the same four, a2a-java
-# swapped one in, a2a-js was pairwise instead of a star, and a2a-rs ran two
-# scenarios against a single peer. The set below is the common core:
-# python and go, both version lines.
+# Peers are explicit rather than `peers: all`: the full matrix is nine agents
+# per scenario against today's five, and that cost has not been measured yet.
+# Nightly already runs the full set.
 #
-# Peers are listed explicitly rather than via `peers: all`. The full matrix
-# is nine agents per scenario against today's five, and the cost of that on
-# every PR has not been measured yet — the design calls for measuring it
-# before making it the PR default. Nightly already runs the full set.
+# `include_own_lines` adds the SUT's own released lines on top, and needs
+# `sut_sdk` passed with the run.
 #
-# `include_own_lines` adds the SUT's own released lines on top: java_v10 when
-# a2a-java is the SUT, ts_v10 and ts_v03 when a2a-js is. Every repo does this
-# by hand today, because "does my change still work against my own last
-# release?" is a different question from cross-SDK compatibility — and it is
-# the one part of each repo's PR set that a fixed shared peer list cannot
-# express. It needs `sut_sdk` to be passed with the run.
-#
-# Each transport becomes its own scenario, and a peer that cannot speak one
-# drops out of that scenario only. So the three entries below cover what took
-# six before: there is no separate "no go_v03, http_json" variant, because
-# matrix.yaml already records that go_v03 has no http_json and the resolver
-# acts on it.
+# Each transport is its own scenario and a peer that cannot speak one drops
+# out of that scenario alone, so there is no separate "no go_v03, http_json"
+# variant — matrix.yaml records the limit and the resolver acts on it.
 
 tests:
   - schema: traversal/v1

@@ -26,6 +26,7 @@ from pathlib import Path
 import yaml
 
 from test_suite.launcher.spec import Kind, TargetSpec
+from test_suite.transports import ALL_TRANSPORTS
 
 
 # `<sdk>_v<num>` with an optional `_<instance>` suffix. sdk is lowercase
@@ -35,11 +36,6 @@ _AGENT_ID_RE = re.compile(r'^([a-z][a-z0-9]*)_(v[0-9]+)(?:_[0-9]+)?$')
 
 class MatrixError(ValueError):
     """Invalid matrix.yaml, or an agent id that doesn't map to any entry."""
-
-
-# Every transport the traversal engine knows. A line that doesn't declare a
-# subset is assumed to speak all of them.
-ALL_TRANSPORTS = frozenset({'jsonrpc', 'grpc', 'http_json'})
 
 
 @dataclass(frozen=True)

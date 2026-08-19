@@ -38,8 +38,8 @@ import itk_runner
 from itk_runner import SUT_ID, ClusterStartupError, Scenario
 from test_suite.launcher import InfraFailure, PermanentError
 from test_suite.launcher.matrix import MatrixError
-from test_suite.scenarios.loader import ScenarioFileError, load_file
-from test_suite.scenarios.resolver import ResolutionError, resolve_all
+from test_suite.scenarios.loader import ScenarioFileError
+from test_suite.scenarios.resolver import ResolutionError
 
 
 logging.basicConfig(
@@ -59,7 +59,9 @@ def load_scenarios(path: Path, sut_sdk: str | None = None) -> list[Scenario]:
     """Load a scenario file in either schema and bind it to concrete agents.
 
     Takes an SDK's ``scenarios.json`` unchanged, or a ``traversal/v1``
-    YAML/JSON file, or one holding a mixture.
+    YAML/JSON file, or one holding a mixture. Goes through
+    :func:`itk_runner.prepare_file`, so the CLI reports skipped and trimmed
+    scenarios exactly as the service does.
 
     Raises:
         SystemExit: The file is missing, malformed, or names a peer the
@@ -67,19 +69,16 @@ def load_scenarios(path: Path, sut_sdk: str | None = None) -> list[Scenario]:
             with a readable message rather than a traceback.
     """
     try:
-        parsed = load_file(path)
-    except ScenarioFileError as e:
+        scenarios = itk_runner.prepare_file(path, sut_sdk=sut_sdk)
+    except (ScenarioFileError, ResolutionError) as e:
         sys.exit(str(e))
 
-    report = resolve_all(parsed, itk_runner.get_matrix(), sut_sdk=sut_sdk)
-    for name, why in report.skipped:
-        logger.info('Skipping %r: %s', name, why)
-    if not report.scenarios:
+    if not scenarios:
         sys.exit(
             f'{path}: no scenarios left to run'
             + (f' for --sut-sdk {sut_sdk}' if sut_sdk else '')
         )
-    return report.scenarios
+    return scenarios
 
 
 def filter_by_sdks(
@@ -183,11 +182,7 @@ def _report(results: dict[str, itk_runner.ScenarioResult]) -> bool:
 
 
 async def main_async(args: argparse.Namespace) -> int:
-    try:
-        scenarios = load_scenarios(args.scenarios, args.sut_sdk)
-    except ResolutionError as e:
-        logger.error('%s', e)  # noqa: TRY400 — a traceback adds nothing here
-        return 1
+    scenarios = load_scenarios(args.scenarios, args.sut_sdk)
     total = len(scenarios)
 
     selected = None

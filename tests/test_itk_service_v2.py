@@ -413,10 +413,9 @@ class TestClusterStartup:
 class TestAgentTableWiring:
     """The executor must be handed this run's real ports, and nothing else.
 
-    Before Story 2.2 these ports were poked into a process-global registry
-    and cleared afterwards; a leaked entry silently retargeted the next run.
-    The table is passed as an argument now, so the leak is structurally
-    impossible — these tests pin both halves.
+    Ports used to live in a process-global registry, where a leaked entry
+    silently retargeted the next run. Passing the table as an argument makes
+    that structurally impossible; these tests pin both halves.
     """
 
     def test_executor_receives_the_launchers_ports(self, client, monkeypatch):

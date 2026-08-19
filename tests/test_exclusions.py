@@ -170,13 +170,7 @@ class TestAppliedDuringResolution:
 
 
 class TestPairwiseMatching:
-    """v0.3 interop is a property of the (SUT, peer) pair, not of a line.
-
-    The same ts_v03 peer works over grpc against a TypeScript counterpart and
-    fails against a Python one, because the compat layer doing the
-    translation lives in whichever SDK drives the hop. These two fields are
-    what makes that expressible.
-    """
+    """Rules can name a (SUT, peer) pair, not just a line."""
 
     def test_sut_sdk_narrows_a_rule_to_one_sut(self):
         e = Exclusion(reason='r', agents=frozenset({'python_v03'}),
@@ -235,10 +229,13 @@ class TestTrimmingVsSkipping:
         assert report.skipped == []
 
     def test_the_trim_is_reported(self):
+        """One entry per removed agent, so a caller can group by cause instead
+        of repeating the rationale once per scenario."""
         report = resolve_all(self._star(), MATRIX, known_failures=self.KNOWN)
         assert len(report.trimmed) == 1
-        name, why = report.trimmed[0]
-        assert 'go_v10' in why
+        name, agent, why = report.trimmed[0]
+        assert name == 'Star'
+        assert agent == 'go_v10'
         assert 'go v1 is broken here' in why
 
     def test_edges_are_rebuilt_for_the_smaller_graph(self):

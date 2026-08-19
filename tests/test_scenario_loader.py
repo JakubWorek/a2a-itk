@@ -1,6 +1,6 @@
 """Loading scenario files: both formats, both encodings, and mixtures.
 
-The compatibility requirement for Phase 2 is that an SDK still on legacy JSON
+The compatibility requirement is that an SDK still on legacy JSON
 and one already on traversal/v1 YAML both work, against the same service, at
 the same time. These tests are that requirement.
 """

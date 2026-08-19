@@ -286,8 +286,7 @@ class TestLegacyPassthrough:
 class TestBundledSmokeEquivalence:
     """scenarios/traversal/smoke.yaml must cover exactly what smoke.json does.
 
-    The worked example of a migration, and the pattern Story 2.3 applies to
-    the rest of the corpus. Compared hop by hop rather than scenario by
+    The worked example of a migration. Compared hop by hop rather than scenario by
     scenario: the YAML splits transports, so it produces more scenarios over
     the same traversals, which is the whole point of splitting.
     """

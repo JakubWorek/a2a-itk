@@ -310,14 +310,9 @@ class TestTransports:
             }}}})
 
     def test_only_go_v03_is_restricted_here(self):
-        """`transports` is for a line that cannot speak one at all, from
-        anywhere. go_v03 is the only such case in the corpus.
-
-        ts_v03 is deliberately absent even though it fails over grpc and
-        http_json for most SUTs: it works over both against a TypeScript
-        counterpart, so the limit belongs to the *pair*. Recording it here
-        would also hide the ts_v10 <-> ts_v03 combination that does work.
-        known_failures.yaml carries that one instead.
+        """`transports` is only for a line that cannot speak one from
+        anywhere. go_v03 is the sole such case; ts_v03's grpc/http_json limit
+        is pairwise and lives in known_failures.yaml.
         """
         m = Matrix.from_default()
         restricted = {

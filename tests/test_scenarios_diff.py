@@ -2,7 +2,7 @@
 
 Two things are tested here: that the comparison itself is sound, and — in
 :class:`TestShippingCorpus` — that the shared set actually covers every hop
-the five repos exercise today. The second is Story 2.3's acceptance gate.
+the five repos exercise today. The second is the acceptance gate.
 """
 
 from __future__ import annotations

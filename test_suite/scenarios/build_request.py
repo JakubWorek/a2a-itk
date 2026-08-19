@@ -12,14 +12,11 @@ Deliberately does no resolving: roles are bound by the service, against the
 ``matrix.yaml`` inside the container, so a scenario means the same thing
 whichever host posts it.
 
-Runs inside the ITK container rather than on the host: reading YAML needs
-PyYAML, and a bare CI runner has no guarantee of it, while the service image
-already depends on it. ``-`` means stdin/stdout, so the file is piped in
-through ``docker exec`` without being copied anywhere.
-
-That is also why this lives in ``test_suite/`` and not ``scripts/``:
-``.dockerignore`` excludes ``scripts/`` precisely because everything in it
-runs on the host, so a script placed there is not in the image at all.
+Runs inside the ITK container: reading YAML needs PyYAML, which the image has
+and a bare CI runner may not. ``-`` means stdin/stdout, so the file is piped
+in through ``docker exec`` without being copied anywhere. It lives under
+``test_suite/`` rather than ``scripts/`` because ``.dockerignore`` keeps the
+latter out of the image.
 
 Usage::
 
